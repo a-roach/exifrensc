@@ -9,13 +9,6 @@ use windows::core::*;
 use windows::Win32::UI::{Controls::*, Shell::*, WindowsAndMessaging::*};
 use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleA};
 
-/*
-pub const IDC_FILE_LIST: i32 = 40001;
-pub const IDC_PATTERN: i32 = 40002;
-pub const IDI_PROG_ICON: i32 = 41001;
-pub const IDC_ADD_PICTURE: i32 = 40003;
-*/
-
 include!("resource_defs.rs");
 
 //const VERSION_STRING: &'static str = env!("VERSION_STRING");
