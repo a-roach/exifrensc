@@ -1,15 +1,20 @@
 #![allow(unused_parens)]
 #![allow(non_snake_case)]
 
+use core::mem::transmute;
 use std::convert::TryInto;
 use std::mem;
 use std::os::raw::c_void;
-use ::core::mem::transmute;
 use windows::core::*;
 use windows::Win32::UI::{Controls::*, Shell::*, WindowsAndMessaging::*};
 use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleA};
+// use windows::Win32::{System::Environment::GetCurrentDirectoryA};
 
 include!("resource_defs.rs");
+
+// Global Variables
+
+static mut SEGOE_UI_SYMBOL: HFONT = HFONT(0); // Has to be global because when we exit we need to destroy it
 
 //const VERSION_STRING: &'static str = env!("VERSION_STRING");
 
@@ -33,22 +38,19 @@ fn main() -> Result<()> {
             }
         }
 
+        DeleteObject(SEGOE_UI_SYMBOL);
+
         Ok(())
     }
 }
 
-extern "system" fn main_dlg_proc(
-    window: HWND,
-    message: u32,
-    wParam: WPARAM,
-    lParam: LPARAM,
-) -> isize {
+extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
-        match message as u32 {
+        match nMsg as u32 {
             WM_INITDIALOG => {
                 let hinst = GetModuleHandleA(None);
-                let hdc = GetDC(window);
-                let segoe_ui_symbol = CreateFontA(
+                let hdc = GetDC(hwnd);
+                SEGOE_UI_SYMBOL = CreateFontA(
                     (-16 * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
                     0,                                           // logical average character width
                     0,                                           // angle of escapement
@@ -66,22 +68,21 @@ extern "system" fn main_dlg_proc(
                 );
 
                 SendDlgItemMessageA(
-                    window,
+                    hwnd,
                     IDC_ADD_PICTURE.id,
                     WM_SETFONT,
-                    WPARAM(segoe_ui_symbol.0 as usize),
+                    WPARAM(SEGOE_UI_SYMBOL.0 as usize),
                     LPARAM(0),
                 );
-                
-                SetDlgItemTextW(window, IDC_ADD_PICTURE.id, ""); // Picture
-                //DeleteObject(segoe_ui_symbol);
 
-                AddToolTip(window, IDC_ADD_PICTURE.id, "Add picture(s)\0");
+                SetDlgItemTextW(hwnd, IDC_ADD_PICTURE.id, ""); // Picture
+                                                                //DeleteObject(SEGOE_UI_SYMBOL);
 
+                AddToolTip(hwnd, IDC_ADD_PICTURE.id, "Add picture(s)\0");
 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(
-                    window,
+                    hwnd,
                     WM_SETICON,
                     WPARAM(ICON_BIG as usize),
                     LPARAM(icon.unwrap().0),
@@ -89,15 +90,104 @@ extern "system" fn main_dlg_proc(
 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(
-                    window,
+                    hwnd,
                     WM_SETICON,
                     WPARAM(ICON_SMALL as usize),
                     LPARAM(icon.unwrap().0),
                 );
 
-                //DragAcceptFiles(GetDlgItem(window, IDC_FILE_LIST) as HWND, true);
+                //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
-                ReleaseDC(window, hdc);
+                /*
+                                let mut file_name_buffer = [0; MAX_PATH as usize];
+                                GetCurrentDirectoryA(file_name_buffer.as_mut_slice());
+                                DlgDirListA(hwnd,
+                                    transmute(&file_name_buffer[0]),
+                                    IDC_FILE_LIST.id,
+                                    0,
+                                    DDL_DRIVES|DDL_DIRECTORY
+                                  );
+                */
+
+                /*
+                 * Setup up our listview
+                 */
+
+                SendMessageW(
+                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
+                    LVM_SETEXTENDEDLISTVIEWSTYLE,
+                    WPARAM(
+                        (LVS_EX_TWOCLICKACTIVATE
+                            | LVS_EX_GRIDLINES
+                            | LVS_EX_HEADERDRAGDROP
+                            | 0x00010000
+                            | LVS_EX_FULLROWSELECT
+                            | LVS_NOSORTHEADER)
+                            .try_into()
+                            .unwrap(),
+                    ),
+                    LPARAM(
+                        (LVS_EX_TWOCLICKACTIVATE
+                            | LVS_EX_GRIDLINES
+                            | LVS_EX_HEADERDRAGDROP
+                            | 0x00010000
+                            | LVS_EX_FULLROWSELECT
+                            | LVS_NOSORTHEADER)
+                            .try_into()
+                            .unwrap(),
+                    ),
+                );
+
+                let mut textu16: Vec<u16> = "Original File Name\0".encode_utf16().collect();
+                let mut lvC = LVCOLUMNA {
+                    mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
+                    fmt: LVCFMT_LEFT,
+                    cx: convert_x_to_client_coords(IDC_FILE_LIST.width / 4),
+                    pszText: transmute(textu16.as_ptr()),
+                    cchTextMax: 0,
+                    iSubItem: 0,
+                    iImage: 0,
+                    iOrder: 0,
+                    cxMin: 50,
+                    cxDefault: 55,
+                    cxIdeal: 55,
+                };
+
+                SendMessageW(
+                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
+                    LVM_INSERTCOLUMN,
+                    WPARAM(0),
+                    LPARAM(&lvC as *const _ as isize),
+                );
+
+                textu16 = "Changed File Name\0".encode_utf16().collect();
+                lvC.pszText = transmute(textu16.as_ptr());
+                SendMessageW(
+                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
+                    LVM_INSERTCOLUMN,
+                    WPARAM(1),
+                    LPARAM(&lvC as *const _ as isize),
+                );
+
+                textu16 = "File Created Time\0".encode_utf16().collect();
+                lvC.pszText = transmute(textu16.as_ptr());
+                SendMessageW(
+                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
+                    LVM_INSERTCOLUMN,
+                    WPARAM(2),
+                    LPARAM(&lvC as *const _ as isize),
+                );
+
+                textu16 = "Photo Taken Time\0".encode_utf16().collect();
+                lvC.pszText = transmute(textu16.as_ptr());
+                SendMessageW(
+                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
+                    LVM_INSERTCOLUMN,
+                    WPARAM(3),
+                    LPARAM(&lvC as *const _ as isize),
+                );
+
+                ReleaseDC(hwnd, hdc);
 
                 0
             }
@@ -127,9 +217,9 @@ extern "system" fn main_dlg_proc(
                 // let mut original_rect = RECT{left:8, top:106, right:new_width-16,bottom:new_height-16};
                 // let borrowed_rect=&mut original_rect;
 
-                // if MapDialogRect(window,&mut *borrowed_rect) == true
+                // if MapDialogRect(hwnd,&mut *borrowed_rect) == true
                 //    {
-                //     SetWindowPos( GetDlgItem(window, IDC_FILE_LIST) as HWND, HWND_TOP,
+                //     SetWindowPos( GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, HWND_TOP,
                 //                   borrowed_rect.left,borrowed_rect.top,
                 //                   borrowed_rect.right-borrowed_rect.left,borrowed_rect.bottom-borrowed_rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
                 //     }
@@ -139,7 +229,7 @@ extern "system" fn main_dlg_proc(
                 // I am not sure what effects this might have on other monitors with different resolutions of DPI settings.
 
                 SetWindowPos(
-                    GetDlgItem(window, IDC_FILE_LIST.id) as HWND,
+                    GetDlgItem(hwnd, IDC_FILE_LIST.id) as HWND,
                     HWND_TOP,
                     convert_x_to_client_coords(IDC_FILE_LIST.x),
                     convert_y_to_client_coords(IDC_FILE_LIST.y),
@@ -149,7 +239,7 @@ extern "system" fn main_dlg_proc(
                 );
 
                 SetWindowPos(
-                    GetDlgItem(window, IDC_PATTERN.id) as HWND,
+                    GetDlgItem(hwnd, IDC_PATTERN.id) as HWND,
                     HWND_TOP,
                     convert_x_to_client_coords(IDC_PATTERN.x),
                     convert_y_to_client_coords(IDC_PATTERN.y),
@@ -184,33 +274,27 @@ extern "system" fn main_dlg_proc(
                 0
             }
             _ => 0,
-            //_ => DefDlgProcA(window, message, wParam, lParam).0,
+            //_ => DefDlgProcA(hwnd, message, wParam, lParam).0,
         }
     }
 }
 
 /// Converts width to client width based on the Seogoe UI font's average size
-/// 
+///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
 fn convert_x_to_client_coords(width: i32) -> (i32) {
     (width * 1750 / 1000)
 }
 
 /// Converts width to client height based on the Seogoe UI font's average size
-/// 
+///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
 fn convert_y_to_client_coords(height: i32) -> (i32) {
     (height * 1875 / 1000)
 }
 
-// Description:
-//   Creates a tooltip for an item in a dialog box.
-// Parameters:
-//   idTool - identifier of an dialog box item.
-//   nDlg - window handle of the dialog box.
-//   text - string to use as the tooltip text.
-
-fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {    
+/// Creates a tooltip for an item in a dialog box.
+fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {
     unsafe {
         let textu16: Vec<u16> = text.encode_utf16().collect();
         let hinst = GetModuleHandleA(None);
@@ -219,7 +303,7 @@ fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {
             Default::default(),
             TOOLTIPS_CLASS,
             None,
-            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP) , //| WINDOW_STYLE(TTS_BALLOON),
+            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), //| WINDOW_STYLE(TTS_BALLOON),
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -233,13 +317,18 @@ fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {
         let toolInfo = TTTOOLINFOA {
             cbSize: mem::size_of::<TTTOOLINFOA>() as u32,
             uFlags: TTF_IDISHWND | TTF_SUBCLASS,
-            hwnd: parent_hwnd,                                   // Handle to the window that contains the tool
-            uId: transmute(GetDlgItem(parent_hwnd, dlg_ID)),     // window handle to the tool. or parent_hwnd
-            rect: RECT { left: 0, top: 0, right: 0, bottom: 0 }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
-            hinst: hinst,                                        // Oue hinstance
-            lpszText: transmute(textu16.as_ptr()),                  // Pointer to a utf16 buffer with the tooltip teext
-            lParam: LPARAM(dlg_ID.try_into().unwrap()),          // A 32-bit application-defined value that is associated with the tool
-            lpReserved: 0 as *mut c_void,                        // Reserved. Must be set to NULL
+            hwnd: parent_hwnd, // Handle to the hwnd that contains the tool
+            uId: transmute(GetDlgItem(parent_hwnd, dlg_ID)), // hwnd handle to the tool. or parent_hwnd
+            rect: RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
+            hinst: hinst,                               // Our hinstance
+            lpszText: transmute(textu16.as_ptr()), // Pointer to a utf16 buffer with the tooltip text
+            lParam: LPARAM(dlg_ID.try_into().unwrap()), // A 32-bit application-defined value that is associated with the tool
+            lpReserved: 0 as *mut c_void,               // Reserved. Must be set to NULL
         };
 
         SendMessageA(

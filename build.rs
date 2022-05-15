@@ -7,7 +7,11 @@ use std::io::{Read, Write};
 use std::collections::HashMap;
 
 fn main() {
-    let version_string = format!(
+    /*
+     * Get the version from cargo.toml, then make a version string we can promulgate throughout the program
+     */
+    
+     let version_string = format!(
         "{} {} ({} build, {} [{}], {})",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
@@ -19,12 +23,15 @@ fn main() {
 
     println!("cargo:rustc-env=VERSION_STRING={}", version_string);
 
-    // Update the manifest.xml file with the current build version
+    /*
+     * Update the manifest.xml file with the current build version
+     * We actually load up a manifest.xml.in file and just replace a string with the version string.
+     * We load the whole thing into memory in one hit because it is such a small file.
+     */ 
     let mut fr = File::open("src/manifest.xml.in").expect("Could not open manifext.xml.in");
     let mut body = String::new();
 
-    fr.read_to_string(&mut body)
-        .expect("Unable to read manifext.xml.in");
+    fr.read_to_string(&mut body).expect("Unable to read manifext.xml.in");
     drop(fr);
     body = body.replace("$CARGO_PKG_VERSION", env!("CARGO_PKG_VERSION"));
 
@@ -34,6 +41,8 @@ fn main() {
 
 
     /*
+     * Create constants which can link the resource stub (written in C by ResEdit) with the main Rust program
+     * 
      * Next bit of code will parse the include file created by ResEdit, looking for #defines, then put them into a
      * hash map with their defined value so that we might use them later on in a custom structure
      */
@@ -42,8 +51,7 @@ fn main() {
     let mut defines = HashMap::new();
     let mut contains_if = 0;
     let mut fr = File::open("src/resource.h").expect("Could not open resource.h");
-    fr.read_to_string(&mut body)
-        .expect("Unable to read resource.h");
+    fr.read_to_string(&mut body).expect("Unable to read resource.h");
     drop(fr);
 
     let lines= body.lines();
@@ -97,8 +105,7 @@ pub struct ControlStuff
 
     let mut body = String::new();
     let mut fr = File::open("src/exifrensc_res.rc").expect("Could not open exifrensc_res.rc");
-    fr.read_to_string(&mut body)
-        .expect("Unable to read resource.h");
+    fr.read_to_string(&mut body).expect("Unable to read resource.h");
     drop(fr);
 
     let lines=body.lines();
@@ -278,5 +285,8 @@ pub struct ControlStuff
     output.write_all(out_body.as_bytes()).expect("Write failed");
     drop(output);
 
+    /*
+     * Compile and link in our resource file
+     */ 
     embed_resource::compile("src/exifrensc_res.rc");
 }
