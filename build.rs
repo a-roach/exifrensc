@@ -119,7 +119,7 @@ pub struct ControlStuff
 
         if !row.contains("IDCANCEL") && !row.contains("IDOK") {
             for param in row.split(",") {
-                if param.contains("PUSHBUTTON") {
+                if param.contains("PUSHBUTTON") || param.contains("LTEXT") || param.contains("CTEXT") || param.contains("RTEXT") {
                     contains_pushbutton = true;
                 } else if param.contains("EDITTEXT") {
                     contains_edittext = true;

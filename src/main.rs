@@ -14,7 +14,7 @@ include!("resource_defs.rs");
 
 // Global Variables
 
-static mut SEGOE_UI_SYMBOL: HFONT = HFONT(0); // Has to be global because when we exit we need to destroy it
+static mut SEGOE_MDL2_ASSETS: HFONT = HFONT(0); // Has to be global because when we exit we need to destroy it
 
 //const VERSION_STRING: &'static str = env!("VERSION_STRING");
 
@@ -38,7 +38,7 @@ fn main() -> Result<()> {
             }
         }
 
-        DeleteObject(SEGOE_UI_SYMBOL);
+        DeleteObject(SEGOE_MDL2_ASSETS);
 
         Ok(())
     }
@@ -50,7 +50,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
             WM_INITDIALOG => {
                 let hinst = GetModuleHandleA(None);
                 let hdc = GetDC(hwnd);
-                SEGOE_UI_SYMBOL = CreateFontA(
+                SEGOE_MDL2_ASSETS = CreateFontA(
                     (-16 * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
                     0,                                           // logical average character width
                     0,                                           // angle of escapement
@@ -64,21 +64,10 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     CLIP_DEFAULT_PRECIS,                         // clipping precision
                     PROOF_QUALITY,                               // output quality
                     FF_DECORATIVE,                               // pitch and family
-                    "Segoe UI Symbol",                           // pointer to typeface name string
+                    "Segoe MDL2 Assets" // "Segoe UI Symbol",    // pointer to typeface name string
                 );
 
-                SendDlgItemMessageA(
-                    hwnd,
-                    IDC_ADD_PICTURE.id,
-                    WM_SETFONT,
-                    WPARAM(SEGOE_UI_SYMBOL.0 as usize),
-                    LPARAM(0),
-                );
 
-                SetDlgItemTextW(hwnd, IDC_ADD_PICTURE.id, ""); // Picture
-                                                                //DeleteObject(SEGOE_UI_SYMBOL);
-
-                AddToolTip(hwnd, IDC_ADD_PICTURE.id, "Add picture(s)\0");
 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(
@@ -96,18 +85,42 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     LPARAM(icon.unwrap().0),
                 );
 
+                SendDlgItemMessageA(
+                    hwnd,
+                    IDC_ADD_PICTURE.id,
+                    WM_SETFONT,
+                    WPARAM(SEGOE_MDL2_ASSETS.0 as usize),
+                    LPARAM(0),
+                );
+                //SetDlgItemTextW(hwnd, IDC_ADD_PICTURE.id, ""); // Picture (E8D4 Contact2)
+                SetDlgItemTextW(hwnd, IDC_ADD_PICTURE.id, "\u{EB9F}");
+                AddToolTip(hwnd, IDC_ADD_PICTURE.id, "Add photo(s)\0");
+
+                SendDlgItemMessageA(hwnd,IDC_RENAME.id,WM_SETFONT,WPARAM(SEGOE_MDL2_ASSETS.0 as usize),LPARAM(0),);
+                SetDlgItemTextW(hwnd, IDC_RENAME.id, "\u{E8AC}");
+                AddToolTip(hwnd, IDC_RENAME.id, "Manually rename selected photo\0");
+
+                SendDlgItemMessageA(hwnd,IDC_ERASE.id,WM_SETFONT,WPARAM(SEGOE_MDL2_ASSETS.0 as usize),LPARAM(0),);
+                SetDlgItemTextW(hwnd, IDC_ERASE.id, "\u{ED60}");
+                AddToolTip(hwnd, IDC_ERASE.id, "Remove photo from the list\0");
+
+                SendDlgItemMessageA(hwnd,IDC_DELETE.id,WM_SETFONT,WPARAM(SEGOE_MDL2_ASSETS.0 as usize),LPARAM(0),);
+                SetDlgItemTextW(hwnd, IDC_DELETE.id, "\u{E74D}");
+                AddToolTip(hwnd, IDC_DELETE.id, "Remove all photos\0");
+
+
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
-                /*
+          /*      
                                 let mut file_name_buffer = [0; MAX_PATH as usize];
                                 GetCurrentDirectoryA(file_name_buffer.as_mut_slice());
                                 DlgDirListA(hwnd,
                                     transmute(&file_name_buffer[0]),
-                                    IDC_FILE_LIST.id,
+                                    40004,
                                     0,
                                     DDL_DRIVES|DDL_DIRECTORY
                                   );
-                */
+            */    
 
                 /*
                  * Setup up our listview
@@ -120,7 +133,6 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                         (LVS_EX_TWOCLICKACTIVATE
                             | LVS_EX_GRIDLINES
                             | LVS_EX_HEADERDRAGDROP
-                            | 0x00010000
                             | LVS_EX_FULLROWSELECT
                             | LVS_NOSORTHEADER)
                             .try_into()
@@ -130,7 +142,6 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                         (LVS_EX_TWOCLICKACTIVATE
                             | LVS_EX_GRIDLINES
                             | LVS_EX_HEADERDRAGDROP
-                            | 0x00010000
                             | LVS_EX_FULLROWSELECT
                             | LVS_NOSORTHEADER)
                             .try_into()
@@ -138,12 +149,12 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     ),
                 );
 
-                let mut textu16: Vec<u16> = "Original File Name\0".encode_utf16().collect();
+                let wide_text: Vec<u16> = "Original File Name\0".encode_utf16().collect();
                 let mut lvC = LVCOLUMNA {
                     mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
                     fmt: LVCFMT_LEFT,
                     cx: convert_x_to_client_coords(IDC_FILE_LIST.width / 4),
-                    pszText: transmute(textu16.as_ptr()),
+                    pszText: transmute(wide_text.as_ptr()),
                     cchTextMax: 0,
                     iSubItem: 0,
                     iImage: 0,
@@ -160,8 +171,9 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     LPARAM(&lvC as *const _ as isize),
                 );
 
-                textu16 = "Changed File Name\0".encode_utf16().collect();
-                lvC.pszText = transmute(textu16.as_ptr());
+                lvC.iSubItem=1;
+                let wide_text: Vec<u16> = "Changed File Name\0".encode_utf16().collect();
+                lvC.pszText = transmute(wide_text.as_ptr());
                 SendMessageW(
                     GetDlgItem(hwnd, IDC_FILE_LIST.id),
                     LVM_INSERTCOLUMN,
@@ -169,8 +181,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     LPARAM(&lvC as *const _ as isize),
                 );
 
-                textu16 = "File Created Time\0".encode_utf16().collect();
-                lvC.pszText = transmute(textu16.as_ptr());
+                let wide_text: Vec<u16> = "File Created Time\0".encode_utf16().collect();
+                lvC.pszText = transmute(wide_text.as_ptr());
                 SendMessageW(
                     GetDlgItem(hwnd, IDC_FILE_LIST.id),
                     LVM_INSERTCOLUMN,
@@ -178,8 +190,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     LPARAM(&lvC as *const _ as isize),
                 );
 
-                textu16 = "Photo Taken Time\0".encode_utf16().collect();
-                lvC.pszText = transmute(textu16.as_ptr());
+                let wide_text: Vec<u16> = "Photo Taken Time\0".encode_utf16().collect();
+                lvC.pszText = transmute(wide_text.as_ptr());
                 SendMessageW(
                     GetDlgItem(hwnd, IDC_FILE_LIST.id),
                     LVM_INSERTCOLUMN,
@@ -290,20 +302,20 @@ fn convert_x_to_client_coords(width: i32) -> (i32) {
 ///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
 fn convert_y_to_client_coords(height: i32) -> (i32) {
-    (height * 1875 / 1000)
+    (height * 1925 / 1000) // had been 1850, but 1925 produces slightly better results 
 }
 
 /// Creates a tooltip for an item in a dialog box.
 fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {
     unsafe {
-        let textu16: Vec<u16> = text.encode_utf16().collect();
+        let wide_text: Vec<u16> = text.encode_utf16().collect();
         let hinst = GetModuleHandleA(None);
 
         let tt_hwnd = CreateWindowExA(
             Default::default(),
             TOOLTIPS_CLASS,
             None,
-            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), //| WINDOW_STYLE(TTS_BALLOON),
+            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), // | WINDOW_STYLE(TTS_BALLOON), // I don't really like the balloon style, but this is how we'd define it
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -326,7 +338,7 @@ fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {
                 bottom: 0,
             }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
             hinst: hinst,                               // Our hinstance
-            lpszText: transmute(textu16.as_ptr()), // Pointer to a utf16 buffer with the tooltip text
+            lpszText: transmute(wide_text.as_ptr()),    // Pointer to a utf16 buffer with the tooltip text
             lParam: LPARAM(dlg_ID.try_into().unwrap()), // A 32-bit application-defined value that is associated with the tool
             lpReserved: 0 as *mut c_void,               // Reserved. Must be set to NULL
         };
