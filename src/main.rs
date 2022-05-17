@@ -14,21 +14,13 @@ include!("resource_defs.rs");
 
 // Global Variables
 
-static mut SEGOE_MDL2_ASSETS: HFONT = HFONT(0); // Has to be global because when we exit we need to destroy it
-
 //const VERSION_STRING: &'static str = env!("VERSION_STRING");
 
 fn main() -> Result<()> {
     unsafe {
         InitCommonControls();
         let hinst = GetModuleHandleA(None);
-        let main_hwnd = CreateDialogParamA(
-            hinst,
-            PCSTR(IDD_MAIN as *mut u8),
-            HWND(0),
-            Some(main_dlg_proc),
-            LPARAM(0),
-        );
+        let main_hwnd = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
         let mut message = MSG::default();
 
         while GetMessageA(&mut message, HWND(0), 0, 0).into() {
@@ -38,89 +30,41 @@ fn main() -> Result<()> {
             }
         }
 
-        DeleteObject(SEGOE_MDL2_ASSETS);
-
         Ok(())
     }
 }
 
 extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
     unsafe {
         match nMsg as u32 {
             WM_INITDIALOG => {
                 let hinst = GetModuleHandleA(None);
-                let hdc = GetDC(hwnd);
-                SEGOE_MDL2_ASSETS = CreateFontA(
-                    (-16 * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
-                    0,                                           // logical average character width
-                    0,                                           // angle of escapement
-                    0,                                           // base-line orientation angle
-                    FW_NORMAL as i32,                            // font weight
-                    0,                                           // italic attribute flag
-                    0,                                           // underline attribute flag
-                    0,                                           // strikeout attribute flag
-                    ANSI_CHARSET,                                // character set identifier
-                    OUT_DEFAULT_PRECIS,                          // output precision
-                    CLIP_DEFAULT_PRECIS,                         // clipping precision
-                    PROOF_QUALITY,                               // output quality
-                    FF_DECORATIVE,                               // pitch and family
-                    "Segoe MDL2 Assets" // "Segoe UI Symbol",    // pointer to typeface name string
-                );
-
-
 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(
-                    hwnd,
-                    WM_SETICON,
-                    WPARAM(ICON_BIG as usize),
-                    LPARAM(icon.unwrap().0),
-                );
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(
-                    hwnd,
-                    WM_SETICON,
-                    WPARAM(ICON_SMALL as usize),
-                    LPARAM(icon.unwrap().0),
-                );
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
-                SendDlgItemMessageA(
-                    hwnd,
-                    IDC_ADD_PICTURE.id,
-                    WM_SETFONT,
-                    WPARAM(SEGOE_MDL2_ASSETS.0 as usize),
-                    LPARAM(0),
-                );
-                //SetDlgItemTextW(hwnd, IDC_ADD_PICTURE.id, ""); // Picture (E8D4 Contact2)
-                SetDlgItemTextW(hwnd, IDC_ADD_PICTURE.id, "\u{EB9F}");
-                AddToolTip(hwnd, IDC_ADD_PICTURE.id, "Add photo(s)\0");
-
-                SendDlgItemMessageA(hwnd,IDC_RENAME.id,WM_SETFONT,WPARAM(SEGOE_MDL2_ASSETS.0 as usize),LPARAM(0),);
-                SetDlgItemTextW(hwnd, IDC_RENAME.id, "\u{E8AC}");
-                AddToolTip(hwnd, IDC_RENAME.id, "Manually rename selected photo\0");
-
-                SendDlgItemMessageA(hwnd,IDC_ERASE.id,WM_SETFONT,WPARAM(SEGOE_MDL2_ASSETS.0 as usize),LPARAM(0),);
-                SetDlgItemTextW(hwnd, IDC_ERASE.id, "\u{ED60}");
-                AddToolTip(hwnd, IDC_ERASE.id, "Remove photo from the list\0");
-
-                SendDlgItemMessageA(hwnd,IDC_DELETE.id,WM_SETFONT,WPARAM(SEGOE_MDL2_ASSETS.0 as usize),LPARAM(0),);
-                SetDlgItemTextW(hwnd, IDC_DELETE.id, "\u{E74D}");
-                AddToolTip(hwnd, IDC_DELETE.id, "Remove all photos\0");
-
+                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16);
+                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE.id, "\u{EB9F}", "Add photo(s)\0");
+                segoe_mdl2_assets.set_text(IDC_RENAME.id, "\u{E8AC}", "Manually rename selected photo\0");
+                segoe_mdl2_assets.set_text(IDC_ERASE.id, "\u{ED60}", "Remove photo from the list\0");
+                segoe_mdl2_assets.set_text(IDC_DELETE.id, "\u{E74D}", "Remove all photos\0");
 
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
-          /*      
-                                let mut file_name_buffer = [0; MAX_PATH as usize];
-                                GetCurrentDirectoryA(file_name_buffer.as_mut_slice());
-                                DlgDirListA(hwnd,
-                                    transmute(&file_name_buffer[0]),
-                                    40004,
-                                    0,
-                                    DDL_DRIVES|DDL_DIRECTORY
-                                  );
-            */    
+                /*
+                                    let mut file_name_buffer = [0; MAX_PATH as usize];
+                                    GetCurrentDirectoryA(file_name_buffer.as_mut_slice());
+                                    DlgDirListA(hwnd,
+                                        transmute(&file_name_buffer[0]),
+                                        40004,
+                                        0,
+                                        DDL_DRIVES|DDL_DIRECTORY
+                                      );
+                */
 
                 /*
                  * Setup up our listview
@@ -130,20 +74,12 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     GetDlgItem(hwnd, IDC_FILE_LIST.id),
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
                     WPARAM(
-                        (LVS_EX_TWOCLICKACTIVATE
-                            | LVS_EX_GRIDLINES
-                            | LVS_EX_HEADERDRAGDROP
-                            | LVS_EX_FULLROWSELECT
-                            | LVS_NOSORTHEADER)
+                        (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER)
                             .try_into()
                             .unwrap(),
                     ),
                     LPARAM(
-                        (LVS_EX_TWOCLICKACTIVATE
-                            | LVS_EX_GRIDLINES
-                            | LVS_EX_HEADERDRAGDROP
-                            | LVS_EX_FULLROWSELECT
-                            | LVS_NOSORTHEADER)
+                        (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER)
                             .try_into()
                             .unwrap(),
                     ),
@@ -164,42 +100,20 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     cxIdeal: 55,
                 };
 
-                SendMessageW(
-                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
-                    LVM_INSERTCOLUMN,
-                    WPARAM(0),
-                    LPARAM(&lvC as *const _ as isize),
-                );
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
-                lvC.iSubItem=1;
+                lvC.iSubItem = 1;
                 let wide_text: Vec<u16> = "Changed File Name\0".encode_utf16().collect();
                 lvC.pszText = transmute(wide_text.as_ptr());
-                SendMessageW(
-                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
-                    LVM_INSERTCOLUMN,
-                    WPARAM(1),
-                    LPARAM(&lvC as *const _ as isize),
-                );
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
 
                 let wide_text: Vec<u16> = "File Created Time\0".encode_utf16().collect();
                 lvC.pszText = transmute(wide_text.as_ptr());
-                SendMessageW(
-                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
-                    LVM_INSERTCOLUMN,
-                    WPARAM(2),
-                    LPARAM(&lvC as *const _ as isize),
-                );
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
 
                 let wide_text: Vec<u16> = "Photo Taken Time\0".encode_utf16().collect();
                 lvC.pszText = transmute(wide_text.as_ptr());
-                SendMessageW(
-                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
-                    LVM_INSERTCOLUMN,
-                    WPARAM(3),
-                    LPARAM(&lvC as *const _ as isize),
-                );
-
-                ReleaseDC(hwnd, hdc);
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
 
                 0
             }
@@ -210,6 +124,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     println!("{}", wParam);
+                    segoe_mdl2_assets.destroy();
                     PostQuitMessage(0);
                 }
                 0
@@ -266,8 +181,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
             WM_DROPFILES => {
                 let mut file_name_buffer = [0; MAX_PATH as usize];
                 let hDrop: HDROP = HDROP(transmute(wParam));
-                let nFiles: u32 =
-                    DragQueryFileA(hDrop, 0xFFFFFFFF, file_name_buffer.as_mut_slice()); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
+                let nFiles: u32 = DragQueryFileA(hDrop, 0xFFFFFFFF, file_name_buffer.as_mut_slice()); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
 
                 for i in 0..nFiles
                 // Walk through the dropped "files" one by one, but they may not all be files, some may be directories 😛
@@ -302,55 +216,101 @@ fn convert_x_to_client_coords(width: i32) -> (i32) {
 ///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
 fn convert_y_to_client_coords(height: i32) -> (i32) {
-    (height * 1925 / 1000) // had been 1850, but 1925 produces slightly better results 
+    (height * 1925 / 1000) // had been 1850, but 1925 produces slightly better results
 }
 
-/// Creates a tooltip for an item in a dialog box.
-fn AddToolTip(parent_hwnd: HWND, dlg_ID: i32, text: &str) -> (HWND) {
-    unsafe {
-        let wide_text: Vec<u16> = text.encode_utf16().collect();
-        let hinst = GetModuleHandleA(None);
+struct WindowsControlText {
+    hwnd: HWND,
+    hfont: HFONT,
+}
 
-        let tt_hwnd = CreateWindowExA(
-            Default::default(),
-            TOOLTIPS_CLASS,
-            None,
-            WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), // | WINDOW_STYLE(TTS_BALLOON), // I don't really like the balloon style, but this is how we'd define it
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            parent_hwnd,
-            None,
-            hinst,
-            std::ptr::null(),
-        );
+impl WindowsControlText {
+    /**
+     * Register a font and size
+     **/
+    fn register_font(&mut self, hwnd: HWND, face: &str, pitch: i32) {
+        unsafe {
+            let hdc = GetDC(hwnd);
+            self.hfont = CreateFontA(
+                (-1 * pitch * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
+                0,                                                  // logical average character width
+                0,                                                  // angle of escapement
+                0,                                                  // base-line orientation angle
+                FW_NORMAL as i32,                                   // font weight
+                0,                                                  // italic attribute flag
+                0,                                                  // underline attribute flag
+                0,                                                  // strikeout attribute flag
+                ANSI_CHARSET,                                       // character set identifier
+                OUT_DEFAULT_PRECIS,                                 // output precision
+                CLIP_DEFAULT_PRECIS,                                // clipping precision
+                PROOF_QUALITY,                                      // output quality
+                FF_DECORATIVE,                                      // pitch and family
+                face,                                               // pointer to typeface name string
+            );
+            self.hwnd = hwnd;
+            ReleaseDC(hwnd, hdc);
+        }
+    }
 
-        let toolInfo = TTTOOLINFOA {
-            cbSize: mem::size_of::<TTTOOLINFOA>() as u32,
-            uFlags: TTF_IDISHWND | TTF_SUBCLASS,
-            hwnd: parent_hwnd, // Handle to the hwnd that contains the tool
-            uId: transmute(GetDlgItem(parent_hwnd, dlg_ID)), // hwnd handle to the tool. or parent_hwnd
-            rect: RECT {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
-            hinst: hinst,                               // Our hinstance
-            lpszText: transmute(wide_text.as_ptr()),    // Pointer to a utf16 buffer with the tooltip text
-            lParam: LPARAM(dlg_ID.try_into().unwrap()), // A 32-bit application-defined value that is associated with the tool
-            lpReserved: 0 as *mut c_void,               // Reserved. Must be set to NULL
-        };
+    /**
+     * Set the caption and tool tip text of a windows control.
+     **/
+    fn set_text(&self, id: i32, caption: &str, tooltip_text: &str) {
+        unsafe {
+            SendDlgItemMessageA(self.hwnd, id, WM_SETFONT, WPARAM(self.hfont.0 as usize), LPARAM(0));
 
-        SendMessageA(
-            tt_hwnd,
-            TTM_ADDTOOL,
-            WPARAM(0),
-            LPARAM(&toolInfo as *const _ as isize),
-        );
-        SendMessageA(tt_hwnd, TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(200));
+            if caption != "" {
+                SetDlgItemTextW(self.hwnd, id, caption);
+            }
 
-        tt_hwnd //
+            if tooltip_text != "" {
+                let wide_text: Vec<u16> = tooltip_text.encode_utf16().collect();
+                let hinst = GetModuleHandleA(None);
+
+                let tt_hwnd = CreateWindowExA(
+                    Default::default(),
+                    TOOLTIPS_CLASS,
+                    None,
+                    WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), // | WINDOW_STYLE(TTS_BALLOON), // I don't really like the balloon style, but this is how we'd define it
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    self.hwnd,
+                    None,
+                    hinst,
+                    std::ptr::null(),
+                );
+
+                let toolInfo = TTTOOLINFOA {
+                    cbSize: mem::size_of::<TTTOOLINFOA>() as u32,
+                    uFlags: TTF_IDISHWND | TTF_SUBCLASS,
+                    hwnd: self.hwnd,                           // Handle to the hwnd that contains the tool
+                    uId: transmute(GetDlgItem(self.hwnd, id)), // hwnd handle to the tool. or parent_hwnd
+                    rect: RECT {
+                        left: 0,
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                    },                                         // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
+                    hinst: hinst,                              // Our hinstance
+                    lpszText: transmute(wide_text.as_ptr()),   // Pointer to a utf16 buffer with the tooltip text
+                    lParam: LPARAM(id.try_into().unwrap()),    // A 32-bit application-defined value that is associated with the tool
+                    lpReserved: 0 as *mut c_void,              // Reserved. Must be set to NULL
+                };
+
+                SendMessageA(tt_hwnd, TTM_ADDTOOL, WPARAM(0), LPARAM(&toolInfo as *const _ as isize));
+                SendMessageA(tt_hwnd, TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(200));
+            }
+        }
+    }
+
+    /**
+     *  Delete the font resource when we are done with it
+     **/
+    fn destroy(&self) {
+        unsafe {
+            DeleteObject(self.hfont);
+        }
     }
 }
