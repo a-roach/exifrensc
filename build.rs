@@ -105,7 +105,7 @@ pub struct ControlStuff
 
     let mut body = String::new();
     let mut fr = File::open("src/exifrensc_res.rc").expect("Could not open exifrensc_res.rc");
-    fr.read_to_string(&mut body).expect("Unable to read resource.h");
+    fr.read_to_string(&mut body).expect("Unable to read exifrensc_res.rc");
     drop(fr);
 
     let lines=body.lines();

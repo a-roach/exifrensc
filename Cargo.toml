@@ -17,9 +17,10 @@ features = [
     "Win32_UI_Shell",
     "Win32_UI_Controls",
     "Win32_System_Environment",
+    "Win32_System_Com",
 ]
 
 
 [build-dependencies]
-embed-resource = "*"
+embed-resource = "1.7.2"
 chrono = "0.4.7"

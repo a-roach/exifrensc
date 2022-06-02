@@ -5,7 +5,10 @@ use core::mem::transmute;
 use std::convert::TryInto;
 use std::mem;
 use std::os::raw::c_void;
+use std::slice::from_raw_parts;
+use std::str;
 use windows::core::*;
+use windows::Win32::System::Com::*;
 use windows::Win32::UI::{Controls::*, Shell::*, WindowsAndMessaging::*};
 use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleA};
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
@@ -49,9 +52,15 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16);
                 segoe_mdl2_assets.set_text(IDC_ADD_PICTURE.id, "\u{EB9F}", "Add photo(s)\0");
+                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER.id, "\u{ED25}", "Add a folder full of photos\0");
+                segoe_mdl2_assets.set_text(IDC_SAVE.id, "\u{E74E}", "Save changes to names\0");
                 segoe_mdl2_assets.set_text(IDC_RENAME.id, "\u{E8AC}", "Manually rename selected photo\0");
                 segoe_mdl2_assets.set_text(IDC_ERASE.id, "\u{ED60}", "Remove photo from the list\0");
                 segoe_mdl2_assets.set_text(IDC_DELETE.id, "\u{E74D}", "Remove all photos\0");
+                segoe_mdl2_assets.set_text(IDC_INFO.id, "\u{E946}", "About\0");
+                segoe_mdl2_assets.set_text(IDC_SETTINGS.id, "\u{F8B0}", "Settings\0");
+                segoe_mdl2_assets.set_text(IDC_SYNC.id, "\u{EDAB}", "Resync names\0");
+                
 
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
@@ -123,10 +132,13 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
-                    println!("{}", wParam);
                     segoe_mdl2_assets.destroy();
                     PostQuitMessage(0);
+                } else if wParam as i32 == IDC_ADD_PICTURE.id {
+                    LoadFile();
+                } else if wParam as i32 == IDC_DELETE.id {
                 }
+
                 0
             }
 
@@ -189,6 +201,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     DragQueryFileA(hDrop, i, file_name_buffer.as_mut_slice());
                     let mut file_name = String::from_utf8_unchecked((&file_name_buffer).to_vec());
                     file_name.truncate(file_name.find('\0').unwrap());
+                    println!("{}", file_name);
                 }
 
                 DragFinish(hDrop);
@@ -292,7 +305,7 @@ impl WindowsControlText {
                         top: 0,
                         right: 0,
                         bottom: 0,
-                    },                                         // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
+                    }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
                     hinst: hinst,                              // Our hinstance
                     lpszText: transmute(wide_text.as_ptr()),   // Pointer to a utf16 buffer with the tooltip text
                     lParam: LPARAM(id.try_into().unwrap()),    // A 32-bit application-defined value that is associated with the tool
@@ -313,4 +326,33 @@ impl WindowsControlText {
             DeleteObject(self.hfont);
         }
     }
+}
+
+fn LoadFile() -> Result<()> {
+    println!("file open");
+    unsafe {
+        let file_dialog: IFileDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+
+        let answer = file_dialog.Show(None); // Basically an error means no file was selected
+        if let Ok(_v) = answer {
+            let selected_items = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
+            let file_name = selected_items.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
+            let slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust slice. This overruns, but that is okay.
+
+            // Figure out how big our file name is by walking the slice until we find the terminating null
+            // Really wish there was another way 😕 
+            let mut st_len: usize = 0;
+            while slice[st_len] != 0 {
+                st_len += 1;
+            }
+
+            let t_file_name = from_raw_parts(file_name.0, st_len); // create another slice the size of the utf16 string
+            let mut file_name_s = String::from_utf16(t_file_name).unwrap(); // convert our utf16 buffer to a rust string
+            println!("{}", file_name_s);
+            CoTaskMemFree(transmute(file_name.0));
+        }
+
+        //file_dialog.Release();
+    }
+    Ok(())
 }
