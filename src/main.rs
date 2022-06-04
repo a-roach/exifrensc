@@ -136,7 +136,21 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     PostQuitMessage(0);
                 } else if wParam as i32 == IDC_ADD_PICTURE.id {
                     LoadFile();
+                } else if wParam as i32 == IDC_ADD_FOLDER.id {
+                    LoadDirectory();
+                } else if wParam as i32 == IDC_SAVE.id {
+                    LoadDirectory();
+                } else if wParam as i32 == IDC_SAVE.id {
+                    LoadDirectory();
                 } else if wParam as i32 == IDC_DELETE.id {
+                    LoadDirectory();
+                } else if wParam as i32 == IDC_ERASE.id {
+                    LoadDirectory();
+                } else if wParam as i32 == IDC_SYNC.id {
+                    LoadDirectory();
+                } else if wParam as i32 == IDC_SETTINGS.id {
+                    LoadDirectory();
+                } else if wParam as i32 == IDC_INFO.id {
                 }
 
                 0
@@ -327,29 +341,98 @@ impl WindowsControlText {
         }
     }
 }
+/// Convert a Rust utf8 string into a windows utf16 string
+fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
+    utf8_in.encode_utf16().collect()
+}
 
 fn LoadFile() -> Result<()> {
     println!("file open");
     unsafe {
-        let file_dialog: IFileDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+        
+        // Change a few of the default options for the dialog
+        file_dialog.SetTitle("Choose Photos to Rename")?;
+        file_dialog.SetOkButtonLabel("Select Photos")?;
+        //file_dialog.SetFileTypes();
+        let mut options = file_dialog.GetOptions().unwrap();
+        options.0=options.0|FOS_ALLOWMULTISELECT.0;
+        file_dialog.SetOptions(options)?;
+
+        let answer = file_dialog.Show(None); // Basically an error means no file was selected
+      /*  if let Ok(__dummy) = answer {
+            let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
+            let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
+            let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
+
+            // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
+            // Really wish there was another way 😕 
+            let mut item_name_len: usize = 0;
+            while tmp_slice[item_name_len] != 0 {
+                item_name_len += 1;
+            } 
+            
+
+            let tmp_file_name = from_raw_parts(file_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
+            let mut file_name_s = String::from_utf16(tmp_file_name).unwrap(); // convert our utf16 buffer to a rust string
+            println!("{}", file_name_s);
+            CoTaskMemFree(transmute(file_name.0));
+        } */
+
+        // Multi selection version 
+        if let Ok(_dummy) = answer {
+            let selected_files = file_dialog.GetResults().unwrap();
+            let nSelected = selected_files.GetCount()?;
+            
+            for i in 0..nSelected {
+                let selected_file = selected_files.GetItemAt(i).unwrap();
+                let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap();
+                let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize);
+                let mut item_name_len:usize = 0;
+                while tmp_slice[item_name_len] !=0 {
+                    item_name_len += 1;
+                }
+                let tmp_file_name = from_raw_parts(file_name.0,item_name_len);
+                let mut file_name_s = String::from_utf16(tmp_file_name).unwrap();
+                println!("{}",file_name_s);
+                CoTaskMemFree(transmute(file_name.0));
+
+            }
+        }
+
+        //file_dialog.Release();
+    }
+    Ok(())
+}
+
+fn LoadDirectory() -> Result<()> {
+    println!("Directory open");
+    unsafe {
+        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+
+        file_dialog.SetTitle("Choose Directories of Photos to Add")?;
+        file_dialog.SetOkButtonLabel("Select Directories")?;
+        let mut options= file_dialog.GetOptions().unwrap();
+        options.0=options.0|FOS_PICKFOLDERS.0|FOS_ALLOWMULTISELECT.0;
+        file_dialog.SetOptions(options)?;
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
         if let Ok(_v) = answer {
-            let selected_items = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
-            let file_name = selected_items.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
-            let slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust slice. This overruns, but that is okay.
+            let selected_directories = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
+            let directory_name = selected_directories.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
+            let tmp_slice = from_raw_parts(directory_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
 
-            // Figure out how big our file name is by walking the slice until we find the terminating null
+            // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
             // Really wish there was another way 😕 
-            let mut st_len: usize = 0;
-            while slice[st_len] != 0 {
-                st_len += 1;
+            let mut item_name_len: usize = 0;
+            while tmp_slice[item_name_len] != 0 {
+                item_name_len += 1;
             }
 
-            let t_file_name = from_raw_parts(file_name.0, st_len); // create another slice the size of the utf16 string
-            let mut file_name_s = String::from_utf16(t_file_name).unwrap(); // convert our utf16 buffer to a rust string
-            println!("{}", file_name_s);
-            CoTaskMemFree(transmute(file_name.0));
+            let tmp_directory_name = from_raw_parts(directory_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
+            let mut directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
+            println!("{}", directory_name_s);
+            CoTaskMemFree(transmute(directory_name.0));
         }
 
         //file_dialog.Release();

@@ -15,6 +15,7 @@ My secondary objective was to learn how to use the win32 API from Rust. This has
 - Add and process tool tips
 - Write a parser in build.rs to process the resource file made by ResEdit and add constants Rust can digest
 - Create ListView
+- Worked on adding dialogs through IFileOpenDialog
 ### To DO
 - Add functions to process ListViews (e.g. adding entries, deleting entries)
 - Add sqlite
