@@ -19,7 +19,15 @@ include!("resource_defs.rs");
 
 //const VERSION_STRING: &'static str = env!("VERSION_STRING");
 
+
 fn main() -> Result<()> {
+    println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
+
+
+    for param in env!("CARGO_PKG_VERSION").split(".") {
+        println!("cargo:rustc-env=VERSION_STRING={}", param);
+    }
+
     unsafe {
         InitCommonControls();
         let hinst = GetModuleHandleA(None);

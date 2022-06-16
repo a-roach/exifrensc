@@ -2,11 +2,18 @@ extern crate embed_resource;
 
 use std::env::consts::{ARCH, OS};
 use chrono::prelude::Local;
+use chrono::{DateTime, Duration,TimeZone};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::collections::HashMap;
 
 fn main() {
+    let annaVersionary=chrono::Local.ymd(2022, 6, 3).and_hms(0,0,0);
+    let now = Local::now();
+    let diff = now.signed_duration_since(annaVersionary);
+    let days = diff.num_days();
+    let seconds= diff.num_seconds() - (days * 86400) ;
+
     /*
      * Get the version from cargo.toml, then make a version string we can promulgate throughout the program
      */
@@ -21,6 +28,23 @@ fn main() {
         Local::now().format("%d %b %Y, %T")
     );
 
+    /*
+     * Now we are going to split the version information from cargo.toml into a couple of variables
+     * I like to replace the third version number with one of my own
+     */ 
+    
+    let mut MAJORVERSION="";
+    let mut MINORVERSION="";
+  
+    {
+        let mut i=0;
+    for param in env!("CARGO_PKG_VERSION").split(".") {
+        if i==0 {MAJORVERSION=param;}
+        if i==1 {MINORVERSION=param;}
+        i+=1;
+    }
+}
+   
     println!("cargo:rustc-env=VERSION_STRING={}", version_string);
 
     /*
@@ -33,12 +57,32 @@ fn main() {
 
     fr.read_to_string(&mut body).expect("Unable to read manifext.xml.in");
     drop(fr);
-    body = body.replace("$CARGO_PKG_VERSION", env!("CARGO_PKG_VERSION"));
+    //body = body.replace("$CARGO_PKG_VERSION", env!("CARGO_PKG_VERSION"));
+    body = body.replace("$MAJORVERSION", MAJORVERSION);
+    body = body.replace("$MINORVERSION", MINORVERSION);
+    body = body.replace("$DAYVERSION",&days.to_string());
+    body = body.replace("$SECONDVERSION",&seconds.to_string());
 
     let mut output = File::create("src/manifest.xml").expect("Create file failed");
     output.write_all(body.as_bytes()).expect("Write failed");
     drop(output);
 
+    /*
+     * Update the version.h file with the current build version
+     */ 
+    let mut fr = File::open("src/version.in").expect("Could not open version.in");
+    let mut body = String::new();
+
+    fr.read_to_string(&mut body).expect("Unable to read version.in");
+    drop(fr);
+    body = body.replace("$MAJORVERSION", MAJORVERSION);
+    body = body.replace("$MINORVERSION", MINORVERSION);
+    body = body.replace("$DAYVERSION",&days.to_string());
+    body = body.replace("$SECONDVERSION",&seconds.to_string());
+
+    let mut output = File::create("src/version.rc").expect("Create file failed");
+    output.write_all(body.as_bytes()).expect("Write failed");
+    drop(output);
 
     /*
      * Create constants which can link the resource stub (written in C by ResEdit) with the main Rust program

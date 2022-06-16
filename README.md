@@ -1,7 +1,7 @@
 # exifrensc
 Renames image files using EXIF data, but maintains synchronisation with Nikon side car files as well.
 ## Rational
-I had a bunch of .nef files which had been modified in either Capture NX-D or NX Studio, so consequently they had associated Nikon side car files. I wanted to bulk rename them using EXIF tags. Seems simple enough, the nef files would have been easy to rename but the associated side car files would have fallen out of sync, so I decided to create a program to rename the nef files and rename the side car files at the same time so the two remained linked together.
+I had a bunch of .nef files which had been modified in either Capture NX-D or NX Studio, so consequently they had associated Nikon sidecar files. I wanted to bulk rename them using EXIF tags. Seems simple enough, the nef files would have been easy to rename but the associated side car files would have fallen out of sync, so I decided to create a program to rename the nef files and rename the sidecar files at the same time so the two remained linked together.
 
 My secondary objective was to learn how to use the win32 API from Rust. This has proven a little more convoluted than I originally expected, but this program demonstrates using many different controls from within the win32 family so might help some people.
 ## Roadmap
