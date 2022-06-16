@@ -8,5 +8,5 @@
 rustfmt.toml
 src/manifest.xml
 src/resource_defs.rs
-src/version.h
+src/version.rc
 *.bak
