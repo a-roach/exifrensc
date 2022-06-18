@@ -1,6 +1,6 @@
 [package]
 name = "exifrensc"
-version = "0.3.0"
+version = "0.4.2"
 authors = ["Andrew Roach <afr69email-Github@yahoo.com>"]
 edition = "2021"
 description = "Program to rename image files using EXIF data and to also synch that with nikon side car files."
@@ -20,8 +20,9 @@ features = [
     "Win32_System_Com",
 ]
 
+[dependencies]
+chrono = "0.4.7"
 
 [build-dependencies]
 embed-resource = "1.7.2"
 chrono = "0.4.7"
-datetime = "0.4.2"

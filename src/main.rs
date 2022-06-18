@@ -1,6 +1,8 @@
 #![allow(unused_parens)]
 #![allow(non_snake_case)]
 
+use chrono::prelude::Local;
+use chrono::TimeZone;
 use core::mem::transmute;
 use std::convert::TryInto;
 use std::mem;
@@ -19,14 +21,8 @@ include!("resource_defs.rs");
 
 //const VERSION_STRING: &'static str = env!("VERSION_STRING");
 
-
 fn main() -> Result<()> {
     println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
-
-
-    for param in env!("CARGO_PKG_VERSION").split(".") {
-        println!("cargo:rustc-env=VERSION_STRING={}", param);
-    }
 
     unsafe {
         InitCommonControls();
@@ -40,7 +36,6 @@ fn main() -> Result<()> {
                 DispatchMessageA(&message);
             }
         }
-
         Ok(())
     }
 }
@@ -48,27 +43,25 @@ fn main() -> Result<()> {
 extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
     unsafe {
+        let hinst = GetModuleHandleA(None);
         match nMsg as u32 {
             WM_INITDIALOG => {
-                let hinst = GetModuleHandleA(None);
-
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
-                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16);
+                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16, FW_NORMAL);
                 segoe_mdl2_assets.set_text(IDC_ADD_PICTURE.id, "\u{EB9F}", "Add photo(s)\0");
                 segoe_mdl2_assets.set_text(IDC_ADD_FOLDER.id, "\u{ED25}", "Add a folder full of photos\0");
                 segoe_mdl2_assets.set_text(IDC_SAVE.id, "\u{E74E}", "Save changes to names\0");
                 segoe_mdl2_assets.set_text(IDC_RENAME.id, "\u{E8AC}", "Manually rename selected photo\0");
-                segoe_mdl2_assets.set_text(IDC_ERASE.id, "\u{ED60}", "Remove photo from the list\0");
-                segoe_mdl2_assets.set_text(IDC_DELETE.id, "\u{E74D}", "Remove all photos\0");
+                segoe_mdl2_assets.set_text(IDC_ERASE.id, "\u{ED60}", "Remove selected photo from the list\0");
+                segoe_mdl2_assets.set_text(IDC_DELETE.id, "\u{ED62}", "Remove all photos from the list\0");
                 segoe_mdl2_assets.set_text(IDC_INFO.id, "\u{E946}", "About\0");
                 segoe_mdl2_assets.set_text(IDC_SETTINGS.id, "\u{F8B0}", "Settings\0");
                 segoe_mdl2_assets.set_text(IDC_SYNC.id, "\u{EDAB}", "Resync names\0");
-                
 
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
@@ -157,8 +150,9 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 } else if wParam as i32 == IDC_SYNC.id {
                     LoadDirectory();
                 } else if wParam as i32 == IDC_SETTINGS.id {
-                    LoadDirectory();
+                    CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
                 } else if wParam as i32 == IDC_INFO.id {
+                    CreateDialogParamA(hinst, PCSTR(IDD_ABOUT as *mut u8), HWND(0), Some(about_dlg_proc), LPARAM(0));
                 }
 
                 0
@@ -204,9 +198,19 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     HWND_TOP,
                     convert_x_to_client_coords(IDC_PATTERN.x),
                     convert_y_to_client_coords(IDC_PATTERN.y),
-                    new_width - convert_x_to_client_coords(IDC_PATTERN.x + 8),
+                    new_width - convert_x_to_client_coords(IDC_PATTERN.x + 26),
                     convert_y_to_client_coords(IDC_PATTERN.height),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_SYNC.id) as HWND,
+                    HWND_TOP,
+                    new_width - convert_y_to_client_coords(21),
+                    convert_y_to_client_coords(IDC_PATTERN.y - 1),
+                    convert_x_to_client_coords(IDC_SYNC.width),
+                    convert_y_to_client_coords(IDC_SYNC.height),
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
                 0
@@ -240,6 +244,95 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
     }
 }
 
+extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    unsafe {
+        match nMsg as u32 {
+            WM_INITDIALOG => {
+                let hinst = GetModuleHandleA(None);
+
+                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
+
+                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+
+                0
+            }
+
+            WM_COMMAND => {
+                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
+                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                    EndDialog(hwnd, 0);
+                }
+
+                0
+            }
+
+            WM_DESTROY => {
+                EndDialog(hwnd, 0);
+                0
+            }
+            _ => 0,
+        }
+    }
+}
+
+extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    static mut segoe_bold: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
+    unsafe {
+        match nMsg as u32 {
+            WM_INITDIALOG => {
+                let hinst = GetModuleHandleA(None);
+
+                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
+
+                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+
+                let annaversionary = chrono::Local.ymd(2022, 6, 17).and_hms(0, 0, 0);
+                let majorversion = env!("CARGO_PKG_VERSION_MAJOR");
+                let minorversion = env!("CARGO_PKG_VERSION_MINOR");
+                let now = Local::now();
+                let diff = now.signed_duration_since(annaversionary);
+                let days = diff.num_days();
+                let minutes = (diff.num_seconds() - (days * 86400)) / 60;
+                let iso_8601 = now.format("%Y-%m-%d %H:%M").to_string();
+
+                segoe_bold.register_font(hwnd, "Segoe UI", 9, FW_BOLD);
+                segoe_bold.set_text(IDC_VER.id, "", "");
+                segoe_bold.set_text(IDC_BUILT.id, "", "");
+
+                SetDlgItemTextW(hwnd, IDC_VERSION.id, format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes));
+                SetDlgItemTextW(hwnd, IDC_BUILDDATE.id, iso_8601);
+
+                0
+            }
+
+            WM_COMMAND => {
+                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
+                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                    segoe_bold.destroy();
+                    EndDialog(hwnd, 0);
+                }
+
+                0
+            }
+
+            WM_DESTROY => {
+                segoe_bold.destroy();
+                EndDialog(hwnd, 0);
+                0
+            }
+            _ => 0,
+        }
+    }
+}
+
 /// Converts width to client width based on the Seogoe UI font's average size
 ///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
@@ -263,7 +356,7 @@ impl WindowsControlText {
     /**
      * Register a font and size
      **/
-    fn register_font(&mut self, hwnd: HWND, face: &str, pitch: i32) {
+    fn register_font(&mut self, hwnd: HWND, face: &str, pitch: i32, weight: u32) {
         unsafe {
             let hdc = GetDC(hwnd);
             self.hfont = CreateFontA(
@@ -271,7 +364,7 @@ impl WindowsControlText {
                 0,                                                  // logical average character width
                 0,                                                  // angle of escapement
                 0,                                                  // base-line orientation angle
-                FW_NORMAL as i32,                                   // font weight
+                weight.try_into().unwrap(),                         // font weight
                 0,                                                  // italic attribute flag
                 0,                                                  // underline attribute flag
                 0,                                                  // strikeout attribute flag
@@ -358,53 +451,52 @@ fn LoadFile() -> Result<()> {
     println!("file open");
     unsafe {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
-        
+
         // Change a few of the default options for the dialog
         file_dialog.SetTitle("Choose Photos to Rename")?;
         file_dialog.SetOkButtonLabel("Select Photos")?;
         //file_dialog.SetFileTypes();
         let mut options = file_dialog.GetOptions().unwrap();
-        options.0=options.0|FOS_ALLOWMULTISELECT.0;
+        options.0 = options.0 | FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options)?;
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
-      /*  if let Ok(__dummy) = answer {
-            let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
-            let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
-            let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
+                                             /*  if let Ok(__dummy) = answer {
+                                                 let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
+                                                 let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
+                                                 let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
 
-            // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
-            // Really wish there was another way 😕 
-            let mut item_name_len: usize = 0;
-            while tmp_slice[item_name_len] != 0 {
-                item_name_len += 1;
-            } 
-            
+                                                 // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
+                                                 // Really wish there was another way 😕
+                                                 let mut item_name_len: usize = 0;
+                                                 while tmp_slice[item_name_len] != 0 {
+                                                     item_name_len += 1;
+                                                 }
 
-            let tmp_file_name = from_raw_parts(file_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
-            let mut file_name_s = String::from_utf16(tmp_file_name).unwrap(); // convert our utf16 buffer to a rust string
-            println!("{}", file_name_s);
-            CoTaskMemFree(transmute(file_name.0));
-        } */
 
-        // Multi selection version 
+                                                 let tmp_file_name = from_raw_parts(file_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
+                                                 let mut file_name_s = String::from_utf16(tmp_file_name).unwrap(); // convert our utf16 buffer to a rust string
+                                                 println!("{}", file_name_s);
+                                                 CoTaskMemFree(transmute(file_name.0));
+                                             } */
+
+        // Multi selection version
         if let Ok(_dummy) = answer {
             let selected_files = file_dialog.GetResults().unwrap();
             let nSelected = selected_files.GetCount()?;
-            
+
             for i in 0..nSelected {
                 let selected_file = selected_files.GetItemAt(i).unwrap();
                 let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap();
                 let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize);
-                let mut item_name_len:usize = 0;
-                while tmp_slice[item_name_len] !=0 {
+                let mut item_name_len: usize = 0;
+                while tmp_slice[item_name_len] != 0 {
                     item_name_len += 1;
                 }
-                let tmp_file_name = from_raw_parts(file_name.0,item_name_len);
+                let tmp_file_name = from_raw_parts(file_name.0, item_name_len);
                 let mut file_name_s = String::from_utf16(tmp_file_name).unwrap();
-                println!("{}",file_name_s);
+                println!("{}", file_name_s);
                 CoTaskMemFree(transmute(file_name.0));
-
             }
         }
 
@@ -420,8 +512,8 @@ fn LoadDirectory() -> Result<()> {
 
         file_dialog.SetTitle("Choose Directories of Photos to Add")?;
         file_dialog.SetOkButtonLabel("Select Directories")?;
-        let mut options= file_dialog.GetOptions().unwrap();
-        options.0=options.0|FOS_PICKFOLDERS.0|FOS_ALLOWMULTISELECT.0;
+        let mut options = file_dialog.GetOptions().unwrap();
+        options.0 = options.0 | FOS_PICKFOLDERS.0 | FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options)?;
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
@@ -431,7 +523,7 @@ fn LoadDirectory() -> Result<()> {
             let tmp_slice = from_raw_parts(directory_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
 
             // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
-            // Really wish there was another way 😕 
+            // Really wish there was another way 😕
             let mut item_name_len: usize = 0;
             while tmp_slice[item_name_len] != 0 {
                 item_name_len += 1;

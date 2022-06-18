@@ -3,7 +3,7 @@
 <assemblyIdentity
     name="Exif Rename with Sidecar Files"
     processorArchitecture="*"
-    version="$MAJORVERSION.$MINORVERSION.$DAYVERSION.$SECONDVERSION"
+    version="$MAJORVERSION.$MINORVERSION.$DAYVERSION.$MINUTEVERSION"
     type="win32"/>
 <description>Rename files using EXIF data and also fix nikon sidecar files at the same time</description>
 <dependency>

@@ -4,8 +4,8 @@
 
 LANGUAGE LANG_ENGLISH, 3
 1 VERSIONINFO
- FILEVERSION 0,3,14,7323
- PRODUCTVERSION 0,3,14,7323
+ FILEVERSION 0,4,2,82
+ PRODUCTVERSION 0,4,2,82
 FILEOS VOS__WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -15,12 +15,12 @@ BEGIN
         BEGIN
             VALUE "Author", "Andrew Roach\0"
             VALUE "FileDescription", "Renames image files whilst updating sidecar files\0"
-            VALUE "FileVersion", "0.3\0"
+            VALUE "FileVersion", "0.4\0"
             VALUE "InternalName", "exifrensc\0"
             VALUE "LegalCopyright", "Copyright ©2022\0"
             VALUE "OriginalFilename", "exifrensc.exe\0"
             VALUE "ProductName", "EXIF Rename including sidecar files\0"
-            VALUE "ProductVersion", "0.3\0"
+            VALUE "ProductVersion", "0.4\0"
         END
     END
     BLOCK "VarFileInfo"
