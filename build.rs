@@ -8,9 +8,10 @@ use std::fs::File;
 use std::io::{Read, Write};
 
 fn main() {
-    let annaversionary = chrono::Local.ymd(2022, 6, 17).and_hms(0, 0, 0);
     let majorversion = env!("CARGO_PKG_VERSION_MAJOR");
     let minorversion = env!("CARGO_PKG_VERSION_MINOR");
+    let anniversary = env!("CARGO_PKG_VERSION_PATCH");
+    let annaversionary = chrono::Local.ymd(anniversary[0..4].parse::<i32>().unwrap(), anniversary[4..6].parse::<u32>().unwrap(), anniversary[6..8].parse::<u32>().unwrap()).and_hms(0, 0, 0);
     let now = Local::now();
     let diff = now.signed_duration_since(annaversionary);
     let days = diff.num_days();
@@ -21,7 +22,7 @@ fn main() {
     /*
      * Get the version from cargo.toml, then make a version string we can promulgate throughout the program
      */
-
+/* 
     let version_string = format!(
         "{} {} ({} build, {} [{}], {})",
         env!("CARGO_PKG_NAME"),
@@ -32,7 +33,7 @@ fn main() {
         Local::now().format("%d %b %Y, %T")
     );
 
-    /*
+ */    /*
      * Update the manifest.xml file with the current build version
      * We actually load up a manifest.xml.in file and just replace a string with the version string.
      * We load the whole thing into memory in one hit because it is such a small file.
@@ -123,7 +124,9 @@ fn main() {
 
     let mut out_body = String::new();
     out_body.push_str(
-        r#"
+r#"
+// This is file is generated automatically by build.rs. Editing it will be futile!
+//
 // Structure which holds the id, location and dimensions of controls
 
 pub struct ControlStuff
@@ -150,6 +153,7 @@ pub struct ControlStuff
         let mut contains_edittext: bool = false;
         let mut contains_control: bool = false;
         let mut define_string = String::new();
+        let suffix="_R"; // if you define suffix as "" then no suffixes are appended and all the constants retain the original #define name. Change it to something else and the extra rectangle information is included
 
         if !row.contains("IDCANCEL") && !row.contains("IDOK") && !row.contains("IDC_STATIC") {
             for param in row.split(",") {
@@ -170,9 +174,10 @@ pub struct ControlStuff
                                 Some(&text) => {
                                     define_string.push_str("pub const ");
                                     define_string.push_str(param.trim());
+                                    define_string.push_str(suffix);
                                     define_string.push_str(": ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
-                                    defines.remove(param.trim());
+                                    if suffix =="" {defines.remove(param.trim());}
                                 }
                                 _ => println!("Errr… 🤨 {}", param.trim()),
                             }
@@ -212,9 +217,10 @@ pub struct ControlStuff
                                 Some(&text) => {
                                     define_string.push_str("pub const ");
                                     define_string.push_str((&param.trim()[9..]).trim());
+                                    define_string.push_str(suffix);
                                     define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
-                                    defines.remove((&param.trim()[9..]).trim());
+                                    if suffix =="" {defines.remove(param.trim());}
                                 }
                                 _ => println!("Errr… 🤨 {}", param.trim()),
                             }
@@ -251,9 +257,10 @@ pub struct ControlStuff
                             Some(&text) => {
                                 define_string.push_str("pub const ");
                                 define_string.push_str(param.trim());
+                                define_string.push_str(suffix);
                                 define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                 define_string.push_str(text);
-                                defines.remove(param.trim());
+                                if suffix =="" {defines.remove(param.trim());}
                             }
                             _ => println!("Errr… 🤨 {}", param.trim()),
                         },
@@ -289,7 +296,7 @@ pub struct ControlStuff
             }
         }
 
-        if define_string != "" {
+        if define_string != "" && suffix !="" {
             out_body.push_str(&define_string);
             out_body.push_str("\n");
         };

@@ -52,16 +52,16 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
-                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16, FW_NORMAL);
-                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE.id, "\u{EB9F}", "Add photo(s)\0");
-                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER.id, "\u{ED25}", "Add a folder full of photos\0");
-                segoe_mdl2_assets.set_text(IDC_SAVE.id, "\u{E74E}", "Save changes to names\0");
-                segoe_mdl2_assets.set_text(IDC_RENAME.id, "\u{E8AC}", "Manually rename selected photo\0");
-                segoe_mdl2_assets.set_text(IDC_ERASE.id, "\u{ED60}", "Remove selected photo from the list\0");
-                segoe_mdl2_assets.set_text(IDC_DELETE.id, "\u{ED62}", "Remove all photos from the list\0");
-                segoe_mdl2_assets.set_text(IDC_INFO.id, "\u{E946}", "About\0");
-                segoe_mdl2_assets.set_text(IDC_SETTINGS.id, "\u{F8B0}", "Settings\0");
-                segoe_mdl2_assets.set_text(IDC_SYNC.id, "\u{EDAB}", "Resync names\0");
+                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16, FW_NORMAL,false);
+                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, "\u{EB9F}", "Add photo(s)\0");
+                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, "\u{ED25}", "Add a folder full of photos\0");
+                segoe_mdl2_assets.set_text(IDC_SAVE, "\u{E74E}", "Save changes to names\0");
+                segoe_mdl2_assets.set_text(IDC_RENAME, "\u{E8AC}", "Manually rename selected photo\0");
+                segoe_mdl2_assets.set_text(IDC_ERASE, "\u{ED60}", "Remove selected photo from the list\0");
+                segoe_mdl2_assets.set_text(IDC_DELETE, "\u{ED62}", "Remove all photos from the list\0");
+                segoe_mdl2_assets.set_text(IDC_INFO, "\u{E946}", "About\0");
+                segoe_mdl2_assets.set_text(IDC_SETTINGS, "\u{F8B0}", "Settings\0");
+                segoe_mdl2_assets.set_text(IDC_SYNC, "\u{EDAB}", "Resync names\0");
 
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
@@ -81,7 +81,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                  */
 
                 SendMessageW(
-                    GetDlgItem(hwnd, IDC_FILE_LIST.id),
+                    GetDlgItem(hwnd, IDC_FILE_LIST),
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
                     WPARAM(
                         (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER)
@@ -99,7 +99,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let mut lvC = LVCOLUMNA {
                     mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
                     fmt: LVCFMT_LEFT,
-                    cx: convert_x_to_client_coords(IDC_FILE_LIST.width / 4),
+                    cx: convert_x_to_client_coords(IDC_FILE_LIST_R.width / 4),
                     pszText: transmute(wide_text.as_ptr()),
                     cchTextMax: 0,
                     iSubItem: 0,
@@ -110,20 +110,20 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     cxIdeal: 55,
                 };
 
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
                 lvC.iSubItem = 1;
                 let wide_text: Vec<u16> = "Changed File Name\0".encode_utf16().collect();
                 lvC.pszText = transmute(wide_text.as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
 
                 let wide_text: Vec<u16> = "File Created Time\0".encode_utf16().collect();
                 lvC.pszText = transmute(wide_text.as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
 
                 let wide_text: Vec<u16> = "Photo Taken Time\0".encode_utf16().collect();
                 lvC.pszText = transmute(wide_text.as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST.id), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
 
                 0
             }
@@ -135,23 +135,23 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     segoe_mdl2_assets.destroy();
                     PostQuitMessage(0);
-                } else if wParam as i32 == IDC_ADD_PICTURE.id {
+                } else if wParam as i32 == IDC_ADD_PICTURE {
                     LoadFile();
-                } else if wParam as i32 == IDC_ADD_FOLDER.id {
+                } else if wParam as i32 == IDC_ADD_FOLDER {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_SAVE.id {
+                } else if wParam as i32 == IDC_SAVE {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_SAVE.id {
+                } else if wParam as i32 == IDC_SAVE {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_DELETE.id {
+                } else if wParam as i32 == IDC_DELETE {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_ERASE.id {
+                } else if wParam as i32 == IDC_ERASE {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_SYNC.id {
+                } else if wParam as i32 == IDC_SYNC {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_SETTINGS.id {
+                } else if wParam as i32 == IDC_SETTINGS {
                     CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
-                } else if wParam as i32 == IDC_INFO.id {
+                } else if wParam as i32 == IDC_INFO {
                     CreateDialogParamA(hinst, PCSTR(IDD_ABOUT as *mut u8), HWND(0), Some(about_dlg_proc), LPARAM(0));
                 }
 
@@ -184,32 +184,32 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 // I am not sure what effects this might have on other monitors with different resolutions of DPI settings.
 
                 SetWindowPos(
-                    GetDlgItem(hwnd, IDC_FILE_LIST.id) as HWND,
+                    GetDlgItem(hwnd, IDC_FILE_LIST_R.id) as HWND,
                     HWND_TOP,
-                    convert_x_to_client_coords(IDC_FILE_LIST.x),
-                    convert_y_to_client_coords(IDC_FILE_LIST.y),
-                    new_width - convert_x_to_client_coords(IDC_FILE_LIST.x + 8),
-                    new_height - convert_y_to_client_coords(IDC_FILE_LIST.y + 8),
+                    convert_x_to_client_coords(IDC_FILE_LIST_R.x),
+                    convert_y_to_client_coords(IDC_FILE_LIST_R.y),
+                    new_width - convert_x_to_client_coords(IDC_FILE_LIST_R.x + 8),
+                    new_height - convert_y_to_client_coords(IDC_FILE_LIST_R.y + 8),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
                 SetWindowPos(
-                    GetDlgItem(hwnd, IDC_PATTERN.id) as HWND,
+                    GetDlgItem(hwnd, IDC_PATTERN_R.id) as HWND,
                     HWND_TOP,
-                    convert_x_to_client_coords(IDC_PATTERN.x),
-                    convert_y_to_client_coords(IDC_PATTERN.y),
-                    new_width - convert_x_to_client_coords(IDC_PATTERN.x + 26),
-                    convert_y_to_client_coords(IDC_PATTERN.height),
+                    convert_x_to_client_coords(IDC_PATTERN_R.x),
+                    convert_y_to_client_coords(IDC_PATTERN_R.y),
+                    new_width - convert_x_to_client_coords(IDC_PATTERN_R.x + 26),
+                    convert_y_to_client_coords(IDC_PATTERN_R.height),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
                 SetWindowPos(
-                    GetDlgItem(hwnd, IDC_SYNC.id) as HWND,
+                    GetDlgItem(hwnd, IDC_SYNC_R.id) as HWND,
                     HWND_TOP,
                     new_width - convert_y_to_client_coords(21),
-                    convert_y_to_client_coords(IDC_PATTERN.y - 1),
-                    convert_x_to_client_coords(IDC_SYNC.width),
-                    convert_y_to_client_coords(IDC_SYNC.height),
+                    convert_y_to_client_coords(IDC_PATTERN_R.y - 1),
+                    convert_x_to_client_coords(IDC_SYNC_R.width),
+                    convert_y_to_client_coords(IDC_SYNC_R.height),
                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
@@ -256,6 +256,21 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
+                /*
+                 * Set up our combo boxes
+                 */
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add an underscore (_) separated serialised number\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add a dash (-) separated serialised number\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add a dot (.) separated serialised number\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Skip\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0)); 
+
+                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("As many as it takes, with no leading 0's\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("One digit, e.g. 1\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Two digits, e.g. 02\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Three digits, e.g. 003\0").as_ptr()))); 
+                SendMessageA(GetDlgItem(hwnd, IDC_NUM_FMT), CB_SETCURSEL, WPARAM(2), LPARAM(0)); 
+
                 0
             }
 
@@ -280,7 +295,10 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 }
 
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
-    static mut segoe_bold: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
+    // Have to be global because we need to destroy our font resources eventually
+    static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    static mut segoe_bold_italic_13: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
     unsafe {
         match nMsg as u32 {
             WM_INITDIALOG => {
@@ -301,12 +319,20 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
                 let minutes = (diff.num_seconds() - (days * 86400)) / 60;
                 let iso_8601 = now.format("%Y-%m-%d %H:%M").to_string();
 
-                segoe_bold.register_font(hwnd, "Segoe UI", 9, FW_BOLD);
-                segoe_bold.set_text(IDC_VER.id, "", "");
-                segoe_bold.set_text(IDC_BUILT.id, "", "");
+                segoe_bold_9.register_font(hwnd, "Segoe UI", 9, FW_BOLD,false);
+                segoe_bold_9.set_text(IDC_VER, "", "");
+                segoe_bold_9.set_text(IDC_BUILT, "", "");
+                segoe_bold_9.set_text(IDC_ST_AUTHOR, "", "");
+                segoe_bold_9.set_text(IDC_ST_COPY, "", "");
 
-                SetDlgItemTextW(hwnd, IDC_VERSION.id, format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes));
-                SetDlgItemTextW(hwnd, IDC_BUILDDATE.id, iso_8601);
+                segoe_bold_italic_13.register_font(hwnd, "Segoe UI", 13, FW_BOLD,true);
+                segoe_bold_italic_13.set_text(IDC_ABOUT_TITLE, "", "");
+
+                segoe_italic_10.register_font(hwnd, "Segoe UI", 10, FW_NORMAL,true);
+                segoe_italic_10.set_text(IDC_DESCRIPTION, "", "");
+
+                SetDlgItemTextW(hwnd, IDC_VERSION, format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes));
+                SetDlgItemTextW(hwnd, IDC_BUILDDATE, iso_8601);
 
                 0
             }
@@ -316,7 +342,9 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
-                    segoe_bold.destroy();
+                    segoe_bold_9.destroy();
+                    segoe_bold_italic_13.destroy();
+                    segoe_italic_10.destroy();
                     EndDialog(hwnd, 0);
                 }
 
@@ -324,7 +352,9 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
             }
 
             WM_DESTROY => {
-                segoe_bold.destroy();
+                segoe_bold_9.destroy();
+                segoe_bold_italic_13.destroy();
+                segoe_italic_10.destroy();
                 EndDialog(hwnd, 0);
                 0
             }
@@ -356,7 +386,7 @@ impl WindowsControlText {
     /**
      * Register a font and size
      **/
-    fn register_font(&mut self, hwnd: HWND, face: &str, pitch: i32, weight: u32) {
+    fn register_font(&mut self, hwnd: HWND, face: &str, pitch: i32, weight: u32, italic: bool) {
         unsafe {
             let hdc = GetDC(hwnd);
             self.hfont = CreateFontA(
@@ -365,7 +395,7 @@ impl WindowsControlText {
                 0,                                                  // angle of escapement
                 0,                                                  // base-line orientation angle
                 weight.try_into().unwrap(),                         // font weight
-                0,                                                  // italic attribute flag
+                italic as u32,                                                  // italic attribute flag
                 0,                                                  // underline attribute flag
                 0,                                                  // strikeout attribute flag
                 ANSI_CHARSET,                                       // character set identifier
