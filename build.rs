@@ -3,7 +3,6 @@ extern crate embed_resource;
 use chrono::prelude::Local;
 use chrono::TimeZone;
 use std::collections::HashMap;
-use std::env::consts::{ARCH, OS};
 use std::fs::File;
 use std::io::{Read, Write};
 
@@ -20,20 +19,6 @@ fn main() {
     let iso_8601 = now.format("%Y%m%D");
 
     /*
-     * Get the version from cargo.toml, then make a version string we can promulgate throughout the program
-     */
-/* 
-    let version_string = format!(
-        "{} {} ({} build, {} [{}], {})",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        "BUILD_TYPE",
-        OS,
-        ARCH,
-        Local::now().format("%d %b %Y, %T")
-    );
-
- */    /*
      * Update the manifest.xml file with the current build version
      * We actually load up a manifest.xml.in file and just replace a string with the version string.
      * We load the whole thing into memory in one hit because it is such a small file.
@@ -89,10 +74,7 @@ fn main() {
     fr.read_to_string(&mut body).expect("Unable to read resource.h");
     drop(fr);
 
-    let lines = body.lines();
-
-    // Unfortunately #defines can not have more tha 16 characters in them, the code below will truncate at 16 for reasons I don't understand :-(
-    for row in lines {
+    for row in body.lines() {
         let mut identifier = "";
 
         if row.contains("#if") {
@@ -103,15 +85,18 @@ fn main() {
             }
         } else if row.contains("#define") {
             let mut start_of_value = 0;
+            let mut param_len=0;
 
+            // Next bit skips over spaces, should be an easier way to do this but...
             for param in row.trim()[8..].trim().split(" ") {
                 if start_of_value == 0 {
                     identifier = param;
+                    param_len=param.len();
                 }
                 start_of_value += 1;
             }
 
-            let value = row.trim()[start_of_value..].trim();
+            let value = row.trim()[start_of_value+param_len-1..].trim();
             defines.insert(identifier, value);
         }
     }
@@ -153,7 +138,7 @@ pub struct ControlStuff
         let mut contains_edittext: bool = false;
         let mut contains_control: bool = false;
         let mut define_string = String::new();
-        let suffix="_R"; // if you define suffix as "" then no suffixes are appended and all the constants retain the original #define name. Change it to something else and the extra rectangle information is included
+        let suffix="_R"; // If we define suffix as "" then no suffixes are appended and all the constants retain the original #define name. Change it to something else and the extra rectangle information is included
 
         if !row.contains("IDCANCEL") && !row.contains("IDOK") && !row.contains("IDC_STATIC") {
             for param in row.split(",") {
@@ -177,7 +162,7 @@ pub struct ControlStuff
                                     define_string.push_str(suffix);
                                     define_string.push_str(": ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
-                                    if suffix =="" {defines.remove(param.trim());}
+                                    if suffix == "" {defines.remove(param.trim());}
                                 }
                                 _ => println!("Errr… 🤨 {}", param.trim()),
                             }
@@ -220,7 +205,7 @@ pub struct ControlStuff
                                     define_string.push_str(suffix);
                                     define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
-                                    if suffix =="" {defines.remove(param.trim());}
+                                    if suffix == "" {defines.remove(param.trim());}
                                 }
                                 _ => println!("Errr… 🤨 {}", param.trim()),
                             }
@@ -260,7 +245,7 @@ pub struct ControlStuff
                                 define_string.push_str(suffix);
                                 define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                 define_string.push_str(text);
-                                if suffix =="" {defines.remove(param.trim());}
+                                if suffix == "" {defines.remove(param.trim());}
                             }
                             _ => println!("Errr… 🤨 {}", param.trim()),
                         },
@@ -301,6 +286,8 @@ pub struct ControlStuff
             out_body.push_str("\n");
         };
     }
+    
+    out_body.push_str("\n");
 
     /*
      * Walk through the left over defines and add them to the file

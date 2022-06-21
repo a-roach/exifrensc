@@ -41,6 +41,7 @@ fn main() -> Result<()> {
 }
 
 extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    #[allow(non_upper_case_globals)]
     static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
     unsafe {
         let hinst = GetModuleHandleA(None);
@@ -95,12 +96,11 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     ),
                 );
 
-                let wide_text: Vec<u16> = "Original File Name\0".encode_utf16().collect();
                 let mut lvC = LVCOLUMNA {
                     mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
                     fmt: LVCFMT_LEFT,
                     cx: convert_x_to_client_coords(IDC_FILE_LIST_R.width / 4),
-                    pszText: transmute(wide_text.as_ptr()),
+                    pszText: transmute(utf8_to_utf16("Original File Name\0").as_ptr()),
                     cchTextMax: 0,
                     iSubItem: 0,
                     iImage: 0,
@@ -113,16 +113,13 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
                 lvC.iSubItem = 1;
-                let wide_text: Vec<u16> = "Changed File Name\0".encode_utf16().collect();
-                lvC.pszText = transmute(wide_text.as_ptr());
+                lvC.pszText = transmute(utf8_to_utf16("Changed File Name\0").as_ptr());
                 SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
 
-                let wide_text: Vec<u16> = "File Created Time\0".encode_utf16().collect();
-                lvC.pszText = transmute(wide_text.as_ptr());
+                lvC.pszText = transmute(utf8_to_utf16("File Created Time\0").as_ptr());
                 SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
 
-                let wide_text: Vec<u16> = "Photo Taken Time\0".encode_utf16().collect();
-                lvC.pszText = transmute(wide_text.as_ptr());
+                lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
                 SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
 
                 0
@@ -206,7 +203,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 SetWindowPos(
                     GetDlgItem(hwnd, IDC_SYNC_R.id) as HWND,
                     HWND_TOP,
-                    new_width - convert_y_to_client_coords(21),
+                    new_width - convert_x_to_client_coords(23),
                     convert_y_to_client_coords(IDC_PATTERN_R.y - 1),
                     convert_x_to_client_coords(IDC_SYNC_R.width),
                     convert_y_to_client_coords(IDC_SYNC_R.height),
@@ -259,17 +256,21 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 /*
                  * Set up our combo boxes
                  */
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add an underscore (_) separated serialised number\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add a dash (-) separated serialised number\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add a dot (.) separated serialised number\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add\0").as_ptr()))); 
                 SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Skip\0").as_ptr())));
                 SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0)); 
 
-                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("As many as it takes, with no leading 0's\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("One digit, e.g. 1\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Two digits, e.g. 02\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_NUM_FMT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Three digits, e.g. 003\0").as_ptr()))); 
-                SendMessageA(GetDlgItem(hwnd, IDC_NUM_FMT), CB_SETCURSEL, WPARAM(2), LPARAM(0)); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("_\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("-\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16(".\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("~\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(0), LPARAM(0)); 
+
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("12345\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("1\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("02\0").as_ptr()))); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("003\0").as_ptr()))); 
+                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(2), LPARAM(0)); 
 
                 0
             }
@@ -296,8 +297,11 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     // Have to be global because we need to destroy our font resources eventually
+    #[allow(non_upper_case_globals)]
     static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    #[allow(non_upper_case_globals)]
     static mut segoe_bold_italic_13: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    #[allow(non_upper_case_globals)]
     static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
     unsafe {
         match nMsg as u32 {
@@ -395,7 +399,7 @@ impl WindowsControlText {
                 0,                                                  // angle of escapement
                 0,                                                  // base-line orientation angle
                 weight.try_into().unwrap(),                         // font weight
-                italic as u32,                                                  // italic attribute flag
+                italic as u32,                                      // italic attribute flag
                 0,                                                  // underline attribute flag
                 0,                                                  // strikeout attribute flag
                 ANSI_CHARSET,                                       // character set identifier
@@ -422,7 +426,7 @@ impl WindowsControlText {
             }
 
             if tooltip_text != "" {
-                let wide_text: Vec<u16> = tooltip_text.encode_utf16().collect();
+                let wide_text=utf8_to_utf16(tooltip_text);
                 let hinst = GetModuleHandleA(None);
 
                 let tt_hwnd = CreateWindowExA(

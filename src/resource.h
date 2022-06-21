@@ -7,11 +7,12 @@
 #define IDD_SETTINGS                            102
 #define IDC_ABOUT_TITLE                         40000
 #define IDC_ERASE                               40000
-#define IDC_NUM_FMT                             40000
 #define IDC_APPLY                               40001
 #define IDC_COPYRIGHT                           40001
 #define IDC_BUILDDATE                           40002
+#define IDC_ON_CONFLICT_NUM                     40002
 #define IDC_FILE_LIST                           40003
+#define IDC_ON_CONFLICT_ADD                     40003
 #define IDC_ST_AUTHOR                           40003
 #define IDC_AUTHOR                              40004
 #define IDC_NX_STUDIO                           40004
