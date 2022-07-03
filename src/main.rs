@@ -1,28 +1,47 @@
 #![allow(unused_parens)]
 #![allow(non_snake_case)]
 
-use chrono::prelude::Local;
-use chrono::TimeZone;
 use core::mem::transmute;
 use std::convert::TryInto;
-use std::mem;
+use std::fs;
 use std::os::raw::c_void;
+use std::path::{Path, PathBuf};
 use std::slice::from_raw_parts;
 use std::str;
+use std::{env, mem};
 use windows::core::*;
 use windows::Win32::System::Com::*;
-use windows::Win32::UI::{Controls::*, Shell::*, WindowsAndMessaging::*};
+use windows::Win32::UI::{Controls::*, Input::KeyboardAndMouse::EnableWindow, Shell::*, WindowsAndMessaging::*};
 use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleA};
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
+use chrono::{prelude::Local, TimeZone};
+use rusqlite::{Connection, Result};
 
 include!("resource_defs.rs");
 
 // Global Variables
-
-//const VERSION_STRING: &'static str = env!("VERSION_STRING");
+// none?? well there are some, but they are defined later
 
 fn main() -> Result<()> {
     println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
+    /*
+        let path_to_FileData_db=find_nx_studio_FileData_db();
+
+        let nk_FileData_db = Connection::open(path_to_FileData_db.0).expect("Failed to load FileData.db database");
+        if (path_to_FileData_db.1 == true)
+        {
+            println!("yersy");
+        }
+    */
+
+    #[allow(non_upper_case_globals)]
+    let mut test_studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
+
+    if test_studio.existant() == true {
+        println!("Yes");
+    } else {
+        println!("No");
+    }
 
     unsafe {
         InitCommonControls();
@@ -40,6 +59,7 @@ fn main() -> Result<()> {
     }
 }
 
+/// Dialog callback function for our main window
 extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     #[allow(non_upper_case_globals)]
     static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
@@ -53,7 +73,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
-                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16, FW_NORMAL,false);
+                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16, FW_NORMAL, false);
                 segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, "\u{EB9F}", "Add photo(s)\0");
                 segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, "\u{ED25}", "Add a folder full of photos\0");
                 segoe_mdl2_assets.set_text(IDC_SAVE, "\u{E74E}", "Save changes to names\0");
@@ -84,16 +104,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 SendMessageW(
                     GetDlgItem(hwnd, IDC_FILE_LIST),
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
-                    WPARAM(
-                        (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER)
-                            .try_into()
-                            .unwrap(),
-                    ),
-                    LPARAM(
-                        (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER)
-                            .try_into()
-                            .unwrap(),
-                    ),
+                    WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
+                    LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
                 );
 
                 let mut lvC = LVCOLUMNA {
@@ -121,6 +133,21 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
                 SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
+
+                /*
+                 * Check to see if we have a directory set up in LOCALAPPDATA
+                 * If we don't have it yet, then we will try to create it
+                 */
+
+                let mut my_appdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+                my_appdata.push_str("\\exifrensc");
+                let test_if_we_have_our_app_data_directory_set_up = PathBuf::from(&my_appdata);
+
+                if test_if_we_have_our_app_data_directory_set_up.is_dir() {
+                    println!("Yes!");
+                } else {
+                    fs::create_dir_all(test_if_we_have_our_app_data_directory_set_up).expect("failed to set up $LOCALAPPDATA");
+                }
 
                 0
             }
@@ -241,6 +268,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
     }
 }
 
+/// Dialog callback for our settings window
 extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
         match nMsg as u32 {
@@ -256,21 +284,42 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 /*
                  * Set up our combo boxes
                  */
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Add\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("Skip\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0)); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("Add\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("Skip\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("_\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("-\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16(".\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("~\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(0), LPARAM(0)); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("_\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("-\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16(".\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("~\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("No delimeter\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(0), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("12345\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("1\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("02\0").as_ptr()))); 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM),CB_ADDSTRING,WPARAM(0),LPARAM(transmute(utf8_to_utf16("003\0").as_ptr()))); 
-                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(2), LPARAM(0)); 
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("12345\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("1\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("02\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("003\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(2), LPARAM(0));
+
+                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("the date shot in the EXIF data\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("use \"File Created\" date\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+
+                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("use \"File Created\" date\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(utf8_to_utf16("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+
+                /*
+                 * Check to see if NX Studio is installed, and if it is, see if we can find the database file
+                 */
+                #[allow(non_upper_case_globals)]
+                let mut NX_Studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
+
+                if NX_Studio.existant() == false {
+                    EnableWindow(GetDlgItem(hwnd, IDC_NX_STUDIO), false);
+                    SendMessageA(GetDlgItem(hwnd, IDC_NX_STUDIO), BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
+                }
 
                 0
             }
@@ -295,14 +344,15 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
     }
 }
 
+/// Dialod callback for our about window
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     // Have to be global because we need to destroy our font resources eventually
     #[allow(non_upper_case_globals)]
-    static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
     #[allow(non_upper_case_globals)]
-    static mut segoe_bold_italic_13: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    static mut segoe_bold_italic_13: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
     #[allow(non_upper_case_globals)]
-    static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; 
+    static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
     unsafe {
         match nMsg as u32 {
             WM_INITDIALOG => {
@@ -323,16 +373,16 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
                 let minutes = (diff.num_seconds() - (days * 86400)) / 60;
                 let iso_8601 = now.format("%Y-%m-%d %H:%M").to_string();
 
-                segoe_bold_9.register_font(hwnd, "Segoe UI", 9, FW_BOLD,false);
+                segoe_bold_9.register_font(hwnd, "Segoe UI", 9, FW_BOLD, false);
                 segoe_bold_9.set_text(IDC_VER, "", "");
                 segoe_bold_9.set_text(IDC_BUILT, "", "");
                 segoe_bold_9.set_text(IDC_ST_AUTHOR, "", "");
                 segoe_bold_9.set_text(IDC_ST_COPY, "", "");
 
-                segoe_bold_italic_13.register_font(hwnd, "Segoe UI", 13, FW_BOLD,true);
+                segoe_bold_italic_13.register_font(hwnd, "Segoe UI", 13, FW_BOLD, true);
                 segoe_bold_italic_13.set_text(IDC_ABOUT_TITLE, "", "");
 
-                segoe_italic_10.register_font(hwnd, "Segoe UI", 10, FW_NORMAL,true);
+                segoe_italic_10.register_font(hwnd, "Segoe UI", 10, FW_NORMAL, true);
                 segoe_italic_10.set_text(IDC_DESCRIPTION, "", "");
 
                 SetDlgItemTextW(hwnd, IDC_VERSION, format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes));
@@ -426,7 +476,7 @@ impl WindowsControlText {
             }
 
             if tooltip_text != "" {
-                let wide_text=utf8_to_utf16(tooltip_text);
+                let wide_text = utf8_to_utf16(tooltip_text);
                 let hinst = GetModuleHandleA(None);
 
                 let tt_hwnd = CreateWindowExA(
@@ -447,18 +497,13 @@ impl WindowsControlText {
                 let toolInfo = TTTOOLINFOA {
                     cbSize: mem::size_of::<TTTOOLINFOA>() as u32,
                     uFlags: TTF_IDISHWND | TTF_SUBCLASS,
-                    hwnd: self.hwnd,                           // Handle to the hwnd that contains the tool
-                    uId: transmute(GetDlgItem(self.hwnd, id)), // hwnd handle to the tool. or parent_hwnd
-                    rect: RECT {
-                        left: 0,
-                        top: 0,
-                        right: 0,
-                        bottom: 0,
-                    }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
-                    hinst: hinst,                              // Our hinstance
-                    lpszText: transmute(wide_text.as_ptr()),   // Pointer to a utf16 buffer with the tooltip text
-                    lParam: LPARAM(id.try_into().unwrap()),    // A 32-bit application-defined value that is associated with the tool
-                    lpReserved: 0 as *mut c_void,              // Reserved. Must be set to NULL
+                    hwnd: self.hwnd,                                     // Handle to the hwnd that contains the tool
+                    uId: transmute(GetDlgItem(self.hwnd, id)),           // hwnd handle to the tool. or parent_hwnd
+                    rect: RECT { left: 0, top: 0, right: 0, bottom: 0 }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
+                    hinst: hinst,                                        // Our hinstance
+                    lpszText: transmute(wide_text.as_ptr()),             // Pointer to a utf16 buffer with the tooltip text
+                    lParam: LPARAM(id.try_into().unwrap()),              // A 32-bit application-defined value that is associated with the tool
+                    lpReserved: 0 as *mut c_void,                        // Reserved. Must be set to NULL
                 };
 
                 SendMessageA(tt_hwnd, TTM_ADDTOOL, WPARAM(0), LPARAM(&toolInfo as *const _ as isize));
@@ -481,18 +526,19 @@ fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
     utf8_in.encode_utf16().collect()
 }
 
-fn LoadFile() -> Result<()> {
+//fn LoadFile() -> Result<()> {
+fn LoadFile() {
     println!("file open");
     unsafe {
-        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
 
         // Change a few of the default options for the dialog
-        file_dialog.SetTitle("Choose Photos to Rename")?;
-        file_dialog.SetOkButtonLabel("Select Photos")?;
+        file_dialog.SetTitle("Choose Photos to Rename");
+        file_dialog.SetOkButtonLabel("Select Photos");
         //file_dialog.SetFileTypes();
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_ALLOWMULTISELECT.0;
-        file_dialog.SetOptions(options)?;
+        file_dialog.SetOptions(options);
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
                                              /*  if let Ok(__dummy) = answer {
@@ -517,7 +563,7 @@ fn LoadFile() -> Result<()> {
         // Multi selection version
         if let Ok(_dummy) = answer {
             let selected_files = file_dialog.GetResults().unwrap();
-            let nSelected = selected_files.GetCount()?;
+            let nSelected = selected_files.GetCount().unwrap();
 
             for i in 0..nSelected {
                 let selected_file = selected_files.GetItemAt(i).unwrap();
@@ -536,19 +582,20 @@ fn LoadFile() -> Result<()> {
 
         //file_dialog.Release();
     }
-    Ok(())
+    //    Ok(())
 }
 
-fn LoadDirectory() -> Result<()> {
+//fn LoadDirectory() -> Result<()> {
+fn LoadDirectory() {
     println!("Directory open");
     unsafe {
-        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
 
-        file_dialog.SetTitle("Choose Directories of Photos to Add")?;
-        file_dialog.SetOkButtonLabel("Select Directories")?;
+        file_dialog.SetTitle("Choose Directories of Photos to Add");
+        file_dialog.SetOkButtonLabel("Select Directories");
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_PICKFOLDERS.0 | FOS_ALLOWMULTISELECT.0;
-        file_dialog.SetOptions(options)?;
+        file_dialog.SetOptions(options);
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
         if let Ok(_v) = answer {
@@ -571,5 +618,50 @@ fn LoadDirectory() -> Result<()> {
 
         //file_dialog.Release();
     }
-    Ok(())
+    //    Ok(())
+}
+
+/// Function to find out of there are any user settings for NX Studio
+///
+/// Returns a PathBuff, which may be empty, so also check to see if it was successful or not
+fn find_nx_studio_FileData_db() -> (PathBuf, bool) {
+    let mut success = false;
+    let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+    localappdata.push_str("\\Nikon\\NX Studio\\DB\\FileData.db");
+    let test_Path = PathBuf::from(&localappdata);
+
+    /*
+     * See if the file exists, if it does, change success to true
+     */
+    if test_Path.exists() {
+        success = true;
+    }
+    (test_Path, success)
+}
+
+struct NxStudioDB {
+    location: PathBuf,
+    success: bool,
+}
+
+/// Functions pertaining to NX Studio's FileData.db
+impl NxStudioDB {
+    /// Check to see if FileData.db exists, if it does, set its location and return true, if it doesn't return false
+    fn existant(&mut self) -> (bool) {
+        if self.location.as_os_str() == "" {
+            let mut success = false;
+            let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+            localappdata.push_str("\\Nikon\\NX Studio\\DB\\FileData.db");
+
+            self.location = PathBuf::from(&localappdata);
+
+            /*
+             * See if the file exists, if it does, change success to true
+             */
+            if self.location.exists() {
+                self.success = true;
+            }
+        }
+        return self.success;
+    }
 }

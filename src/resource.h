@@ -16,8 +16,10 @@
 #define IDC_ST_AUTHOR                           40003
 #define IDC_AUTHOR                              40004
 #define IDC_NX_STUDIO                           40004
+#define IDC_DATE_SHOOT_PRIMARY                  40005
 #define IDC_VER                                 40005
 #define IDC_BUILT                               40006
+#define IDC_DATE_SHOOT_SECONDARY                40006
 #define IDC_ON_CONFLICT                         40007
 #define IDC_ST_COPY                             40007
 #define IDC_DESCRIPTION                         40008

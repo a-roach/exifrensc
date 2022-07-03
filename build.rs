@@ -114,6 +114,7 @@ r#"
 //
 // Structure which holds the id, location and dimensions of controls
 
+#[derive(Debug)]
 pub struct ControlStuff
   { id: i32,
     x: i32,

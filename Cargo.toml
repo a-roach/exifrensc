@@ -18,10 +18,12 @@ features = [
     "Win32_UI_Controls",
     "Win32_System_Environment",
     "Win32_System_Com",
+    "Win32_UI_Input_KeyboardAndMouse",
 ]
 
 [dependencies]
 chrono = "0.4.7"
+rusqlite = {version="0.27.0",features = ["bundled"]}
 
 [build-dependencies]
 embed-resource = "1.7.2"
