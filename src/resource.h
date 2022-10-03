@@ -38,3 +38,4 @@
 #define IDC_CANCEL                              41020
 #define IDC_SAVE_SETTING                        41021
 #define IDC_MASK                                41022
+#define IDB_SETTINGS                            32158

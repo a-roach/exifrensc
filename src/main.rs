@@ -4,18 +4,20 @@
 use core::mem::transmute;
 use std::convert::TryInto;
 use std::fs;
+use std::fs::File;
+use std::io::Write;
 use std::os::raw::c_void;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::slice::from_raw_parts;
-use std::str;
-use std::{env, mem};
+use std::{env, mem, slice, str};
 use windows::core::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::{Controls::*, Input::KeyboardAndMouse::EnableWindow, Shell::*, WindowsAndMessaging::*};
-use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::GetModuleHandleA};
+use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
 use chrono::{prelude::Local, TimeZone};
 use rusqlite::{Connection, Result};
+use windows::Win32::Storage::FileSystem::*;
 
 include!("resource_defs.rs");
 
@@ -39,20 +41,22 @@ fn main() -> Result<()> {
 
     if test_studio.existant() == true {
         println!("Yes");
+        ResourceSave(IDB_SETTINGS, "SQLITE\0", "c:\\dev\\test.xxx"); // id: i32, section: &str, filename: &str
     } else {
         println!("No");
     }
 
     unsafe {
         InitCommonControls();
-        let hinst = GetModuleHandleA(None);
-        let main_hwnd = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
-        let mut message = MSG::default();
+        if let Ok(hinst) = GetModuleHandleA(None) {
+            let main_hwnd = CreateDialogParamA(Some(hinst), PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
+            let mut message = MSG::default();
 
-        while GetMessageA(&mut message, HWND(0), 0, 0).into() {
-            if (IsDialogMessageA(main_hwnd, &message) == false) {
-                TranslateMessage(&message);
-                DispatchMessageA(&message);
+            while GetMessageA(&mut message, HWND(0), 0, 0).into() {
+                if (IsDialogMessageA(main_hwnd, &message) == false) {
+                    TranslateMessage(&message);
+                    DispatchMessageA(&message);
+                }
             }
         }
         Ok(())
@@ -64,7 +68,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
     #[allow(non_upper_case_globals)]
     static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
     unsafe {
-        let hinst = GetModuleHandleA(None);
+        let hinst = GetModuleHandleA(None).unwrap();
         match nMsg as u32 {
             WM_INITDIALOG => {
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
@@ -73,16 +77,16 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
-                segoe_mdl2_assets.register_font(hwnd, "Segoe MDL2 Assets", 16, FW_NORMAL, false);
-                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, "\u{EB9F}", "Add photo(s)\0");
-                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, "\u{ED25}", "Add a folder full of photos\0");
-                segoe_mdl2_assets.set_text(IDC_SAVE, "\u{E74E}", "Save changes to names\0");
-                segoe_mdl2_assets.set_text(IDC_RENAME, "\u{E8AC}", "Manually rename selected photo\0");
-                segoe_mdl2_assets.set_text(IDC_ERASE, "\u{ED60}", "Remove selected photo from the list\0");
-                segoe_mdl2_assets.set_text(IDC_DELETE, "\u{ED62}", "Remove all photos from the list\0");
-                segoe_mdl2_assets.set_text(IDC_INFO, "\u{E946}", "About\0");
-                segoe_mdl2_assets.set_text(IDC_SETTINGS, "\u{F8B0}", "Settings\0");
-                segoe_mdl2_assets.set_text(IDC_SYNC, "\u{EDAB}", "Resync names\0");
+                segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 16, FW_NORMAL.0, false);
+                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)\0"));
+                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, w!("\u{ED25}"), w!("Add a folder full of photos\0"));
+                segoe_mdl2_assets.set_text(IDC_SAVE, w!("\u{E74E}"), w!("Save changes to names\0"));
+                segoe_mdl2_assets.set_text(IDC_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo\0"));
+                segoe_mdl2_assets.set_text(IDC_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list\0"));
+                segoe_mdl2_assets.set_text(IDC_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list\0"));
+                segoe_mdl2_assets.set_text(IDC_INFO, w!("\u{E946}"), w!("About"));
+                segoe_mdl2_assets.set_text(IDC_SETTINGS, w!("\u{F8B0}"), w!("Settings\0"));
+                segoe_mdl2_assets.set_text(IDC_SYNC, w!("\u{EDAB}"), w!("Resync names\0"));
 
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
@@ -243,12 +247,12 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
             WM_DROPFILES => {
                 let mut file_name_buffer = [0; MAX_PATH as usize];
                 let hDrop: HDROP = HDROP(transmute(wParam));
-                let nFiles: u32 = DragQueryFileA(hDrop, 0xFFFFFFFF, file_name_buffer.as_mut_slice()); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
+                let nFiles: u32 = DragQueryFileA(hDrop, 0xFFFFFFFF, Some(file_name_buffer.as_mut_slice())); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
 
                 for i in 0..nFiles
                 // Walk through the dropped "files" one by one, but they may not all be files, some may be directories 😛
                 {
-                    DragQueryFileA(hDrop, i, file_name_buffer.as_mut_slice());
+                    DragQueryFileA(hDrop, i, Some(file_name_buffer.as_mut_slice()));
                     let mut file_name = String::from_utf8_unchecked((&file_name_buffer).to_vec());
                     file_name.truncate(file_name.find('\0').unwrap());
                     println!("{}", file_name);
@@ -263,7 +267,6 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 0
             }
             _ => 0,
-            //_ => DefDlgProcA(hwnd, message, wParam, lParam).0,
         }
     }
 }
@@ -271,10 +274,9 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 /// Dialog callback for our settings window
 extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
+        let hinst = GetModuleHandleA(None).unwrap();
         match nMsg as u32 {
             WM_INITDIALOG => {
-                let hinst = GetModuleHandleA(None);
-
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
 
@@ -354,10 +356,9 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
     #[allow(non_upper_case_globals)]
     static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
     unsafe {
+        let hinst = GetModuleHandleA(None).unwrap();
         match nMsg as u32 {
             WM_INITDIALOG => {
-                let hinst = GetModuleHandleA(None);
-
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
 
@@ -372,21 +373,22 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
                 let days = diff.num_days();
                 let minutes = (diff.num_seconds() - (days * 86400)) / 60;
                 let iso_8601 = now.format("%Y-%m-%d %H:%M").to_string();
+                let vers = format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes).to_string();
 
-                segoe_bold_9.register_font(hwnd, "Segoe UI", 9, FW_BOLD, false);
-                segoe_bold_9.set_text(IDC_VER, "", "");
-                segoe_bold_9.set_text(IDC_BUILT, "", "");
-                segoe_bold_9.set_text(IDC_ST_AUTHOR, "", "");
-                segoe_bold_9.set_text(IDC_ST_COPY, "", "");
+                segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
+                segoe_bold_9.set_text(IDC_VER, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_BUILT, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_ST_AUTHOR, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_ST_COPY, w!(""), w!(""));
 
-                segoe_bold_italic_13.register_font(hwnd, "Segoe UI", 13, FW_BOLD, true);
-                segoe_bold_italic_13.set_text(IDC_ABOUT_TITLE, "", "");
+                segoe_bold_italic_13.register_font(hwnd, s!("Segoe UI"), 13, FW_BOLD.0, true);
+                segoe_bold_italic_13.set_text(IDC_ABOUT_TITLE, w!(""), w!(""));
 
-                segoe_italic_10.register_font(hwnd, "Segoe UI", 10, FW_NORMAL, true);
-                segoe_italic_10.set_text(IDC_DESCRIPTION, "", "");
+                segoe_italic_10.register_font(hwnd, s!("Segoe UI"), 10, FW_NORMAL.0, true);
+                segoe_italic_10.set_text(IDC_DESCRIPTION, w!(""), w!(""));
 
-                SetDlgItemTextW(hwnd, IDC_VERSION, format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes));
-                SetDlgItemTextW(hwnd, IDC_BUILDDATE, iso_8601);
+                SetDlgItemTextA(hwnd, IDC_VERSION, PCSTR(vers.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_BUILDDATE, PCSTR(iso_8601.as_ptr()));
 
                 0
             }
@@ -401,7 +403,6 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
                     segoe_italic_10.destroy();
                     EndDialog(hwnd, 0);
                 }
-
                 0
             }
 
@@ -440,7 +441,7 @@ impl WindowsControlText {
     /**
      * Register a font and size
      **/
-    fn register_font(&mut self, hwnd: HWND, face: &str, pitch: i32, weight: u32, italic: bool) {
+    fn register_font(&mut self, hwnd: HWND, face: PCSTR, pitch: i32, weight: u32, italic: bool) {
         unsafe {
             let hdc = GetDC(hwnd);
             self.hfont = CreateFontA(
@@ -452,11 +453,11 @@ impl WindowsControlText {
                 italic as u32,                                      // italic attribute flag
                 0,                                                  // underline attribute flag
                 0,                                                  // strikeout attribute flag
-                ANSI_CHARSET,                                       // character set identifier
-                OUT_DEFAULT_PRECIS,                                 // output precision
-                CLIP_DEFAULT_PRECIS,                                // clipping precision
-                PROOF_QUALITY,                                      // output quality
-                FF_DECORATIVE,                                      // pitch and family
+                ANSI_CHARSET.0.into(),                              // character set identifier
+                OUT_DEFAULT_PRECIS.0.into(),                        // output precision
+                CLIP_DEFAULT_PRECIS.0.into(),                       // clipping precision
+                PROOF_QUALITY.0.into(),                             // output quality
+                FF_DECORATIVE.0.into(),                             // pitch and family
                 face,                                               // pointer to typeface name string
             );
             self.hwnd = hwnd;
@@ -467,21 +468,20 @@ impl WindowsControlText {
     /**
      * Set the caption and tool tip text of a windows control.
      **/
-    fn set_text(&self, id: i32, caption: &str, tooltip_text: &str) {
+    fn set_text(&self, id: i32, caption: &HSTRING, tooltip_text: &HSTRING) {
         unsafe {
+            let hinst = GetModuleHandleA(None).unwrap();
+
             SendDlgItemMessageA(self.hwnd, id, WM_SETFONT, WPARAM(self.hfont.0 as usize), LPARAM(0));
 
-            if caption != "" {
+            if caption != w!("") {
                 SetDlgItemTextW(self.hwnd, id, caption);
             }
 
-            if tooltip_text != "" {
-                let wide_text = utf8_to_utf16(tooltip_text);
-                let hinst = GetModuleHandleA(None);
-
+            if tooltip_text != w!("") {
                 let tt_hwnd = CreateWindowExA(
                     Default::default(),
-                    TOOLTIPS_CLASS,
+                    PCSTR("tooltips_class32\0".as_ptr()),
                     None,
                     WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), // | WINDOW_STYLE(TTS_BALLOON), // I don't really like the balloon style, but this is how we'd define it
                     CW_USEDEFAULT,
@@ -491,7 +491,7 @@ impl WindowsControlText {
                     self.hwnd,
                     None,
                     hinst,
-                    std::ptr::null(),
+                    None,
                 );
 
                 let toolInfo = TTTOOLINFOA {
@@ -501,7 +501,7 @@ impl WindowsControlText {
                     uId: transmute(GetDlgItem(self.hwnd, id)),           // hwnd handle to the tool. or parent_hwnd
                     rect: RECT { left: 0, top: 0, right: 0, bottom: 0 }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
                     hinst: hinst,                                        // Our hinstance
-                    lpszText: transmute(wide_text.as_ptr()),             // Pointer to a utf16 buffer with the tooltip text
+                    lpszText: transmute(tooltip_text.as_ptr()),          // Pointer to a utf16 buffer with the tooltip text
                     lParam: LPARAM(id.try_into().unwrap()),              // A 32-bit application-defined value that is associated with the tool
                     lpReserved: 0 as *mut c_void,                        // Reserved. Must be set to NULL
                 };
@@ -533,8 +533,8 @@ fn LoadFile() {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
 
         // Change a few of the default options for the dialog
-        file_dialog.SetTitle("Choose Photos to Rename");
-        file_dialog.SetOkButtonLabel("Select Photos");
+        file_dialog.SetTitle(w!("Choose Photos to Rename"));
+        file_dialog.SetOkButtonLabel(w!("Select Photos"));
         //file_dialog.SetFileTypes();
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_ALLOWMULTISELECT.0;
@@ -576,7 +576,7 @@ fn LoadFile() {
                 let tmp_file_name = from_raw_parts(file_name.0, item_name_len);
                 let mut file_name_s = String::from_utf16(tmp_file_name).unwrap();
                 println!("{}", file_name_s);
-                CoTaskMemFree(transmute(file_name.0));
+                // CoTaskMemFree(file_name.0 as _);
             }
         }
 
@@ -590,9 +590,10 @@ fn LoadDirectory() {
     println!("Directory open");
     unsafe {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
-
-        file_dialog.SetTitle("Choose Directories of Photos to Add");
-        file_dialog.SetOkButtonLabel("Select Directories");
+        let xx = w!("Choose Directories of Photos to Add");
+        file_dialog.SetTitle(xx);
+        let xx = w!("Select Directories");
+        file_dialog.SetOkButtonLabel(xx);
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_PICKFOLDERS.0 | FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options);
@@ -613,7 +614,7 @@ fn LoadDirectory() {
             let tmp_directory_name = from_raw_parts(directory_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
             let mut directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
             println!("{}", directory_name_s);
-            CoTaskMemFree(transmute(directory_name.0));
+            // CoTaskMemFree(directory_name.0.as_ref().as_ptr());
         }
 
         //file_dialog.Release();
@@ -663,5 +664,26 @@ impl NxStudioDB {
             }
         }
         return self.success;
+    }
+}
+
+/// Function for saving a resource from the executable. Prints out an error message if not successful.
+fn ResourceSave(id: i32, section: &str, filename: &str) {
+    unsafe {
+        let the_asset: Result<_, _> = FindResourceA(HINSTANCE(0), PCSTR(id as *mut u8), PCSTR(section.as_ptr()));
+
+        match the_asset {
+            Ok(ResourceHandle) => {
+                let GlobalMemoryBlock = LoadResource(HINSTANCE(0), ResourceHandle);
+                let ptMem = LockResource(GlobalMemoryBlock);
+                let dwSize: usize = SizeofResource(HINSTANCE(0), ResourceHandle).try_into().unwrap();
+                let slice = slice::from_raw_parts(ptMem as *const u8, dwSize);
+
+                let mut output = File::create(filename).expect("Create file failed");
+                output.write_all(&slice[0..dwSize]).expect("Write failed");
+                drop(output);
+            }
+            Err(e) => println!("Error {}", e),
+        }
     }
 }
