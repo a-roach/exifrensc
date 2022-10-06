@@ -7,7 +7,7 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::os::raw::c_void;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::slice::from_raw_parts;
 use std::{env, mem, slice, str};
 use windows::core::*;
@@ -22,7 +22,8 @@ use windows::Win32::Storage::FileSystem::*;
 include!("resource_defs.rs");
 
 // Global Variables
-// none?? well there are some, but they are defined later
+#[allow(non_upper_case_globals)]
+static mut settings_sqlite: String = String::new();
 
 fn main() -> Result<()> {
     println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
@@ -40,10 +41,35 @@ fn main() -> Result<()> {
     let mut test_studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
     if test_studio.existant() == true {
-        println!("Yes");
-        ResourceSave(IDB_SETTINGS, "SQLITE\0", "c:\\dev\\test.xxx"); // id: i32, section: &str, filename: &str
     } else {
         println!("No");
+    }
+
+    /*
+     * Check to see if we have a directory set up in LOCALAPPDATA
+     * If we don't have it yet, then we will try to create it
+     */
+
+    let mut my_appdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+    my_appdata.push_str("\\exifrensc");
+    let test_if_we_have_our_app_data_directory_set_up = PathBuf::from(&my_appdata);
+    if !test_if_we_have_our_app_data_directory_set_up.is_dir() {
+        fs::create_dir_all(test_if_we_have_our_app_data_directory_set_up).expect("failed to set up $LOCALAPPDATA");
+    }
+
+    /*
+     * Check to see if we already have a copy of the settings database.
+     * If not extract a copy from the resource stub.
+     *
+     * On this occasion I am saving my settings in an sqlite database rather than the registry.
+     * This is in part for "proof of concept", but also exposes the settings to any sql scripts which may need them.
+     */
+
+    unsafe {
+        settings_sqlite = my_appdata + ("\\settings.sqlite");
+        if (!Path::new(&settings_sqlite).exists()) {
+            ResourceSave(IDB_SETTINGS, "SQLITE\0", &settings_sqlite); // id: i32, section: &str, filename: &str
+        }
     }
 
     unsafe {
@@ -78,27 +104,31 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
                 segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 16, FW_NORMAL.0, false);
-                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)\0"));
-                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, w!("\u{ED25}"), w!("Add a folder full of photos\0"));
-                segoe_mdl2_assets.set_text(IDC_SAVE, w!("\u{E74E}"), w!("Save changes to names\0"));
-                segoe_mdl2_assets.set_text(IDC_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo\0"));
-                segoe_mdl2_assets.set_text(IDC_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list\0"));
-                segoe_mdl2_assets.set_text(IDC_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list\0"));
+                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)"));
+                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, w!("\u{ED25}"), w!("Add a folder full of photos"));
+                segoe_mdl2_assets.set_text(IDC_SAVE, w!("\u{E74E}"), w!("Save changes to names"));
+                segoe_mdl2_assets.set_text(IDC_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo"));
+                segoe_mdl2_assets.set_text(IDC_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list"));
+                segoe_mdl2_assets.set_text(IDC_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list"));
                 segoe_mdl2_assets.set_text(IDC_INFO, w!("\u{E946}"), w!("About"));
-                segoe_mdl2_assets.set_text(IDC_SETTINGS, w!("\u{F8B0}"), w!("Settings\0"));
-                segoe_mdl2_assets.set_text(IDC_SYNC, w!("\u{EDAB}"), w!("Resync names\0"));
+                segoe_mdl2_assets.set_text(IDC_SETTINGS, w!("\u{F8B0}"), w!("Settings"));
+                segoe_mdl2_assets.set_text(IDC_SYNC, w!("\u{EDAB}"), w!("Resync names"));
 
                 //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
 
                 /*
-                                    let mut file_name_buffer = [0; MAX_PATH as usize];
-                                    GetCurrentDirectoryA(file_name_buffer.as_mut_slice());
-                                    DlgDirListA(hwnd,
-                                        transmute(&file_name_buffer[0]),
-                                        40004,
-                                        0,
-                                        DDL_DRIVES|DDL_DIRECTORY
-                                      );
+                 * If we wanted to set up a list box with files and directories, this is how we would do it.
+                 * Ive neer much liked the Win 3.11 look to this function so don't use it.
+                 *
+
+                let mut file_name_buffer = [0; MAX_PATH as usize];
+                GetCurrentDirectoryA(file_name_buffer.as_mut_slice());
+                DlgDirListA(hwnd,
+                    transmute(&file_name_buffer[0]),
+                    40004,
+                    0,
+                    DDL_DRIVES|DDL_DIRECTORY
+                    );
                 */
 
                 /*
@@ -137,21 +167,6 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
                 SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
-
-                /*
-                 * Check to see if we have a directory set up in LOCALAPPDATA
-                 * If we don't have it yet, then we will try to create it
-                 */
-
-                let mut my_appdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
-                my_appdata.push_str("\\exifrensc");
-                let test_if_we_have_our_app_data_directory_set_up = PathBuf::from(&my_appdata);
-
-                if test_if_we_have_our_app_data_directory_set_up.is_dir() {
-                    println!("Yes!");
-                } else {
-                    fs::create_dir_all(test_if_we_have_our_app_data_directory_set_up).expect("failed to set up $LOCALAPPDATA");
-                }
 
                 0
             }
@@ -322,7 +337,6 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     EnableWindow(GetDlgItem(hwnd, IDC_NX_STUDIO), false);
                     SendMessageA(GetDlgItem(hwnd, IDC_NX_STUDIO), BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
                 }
-
                 0
             }
 
@@ -346,7 +360,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
     }
 }
 
-/// Dialod callback for our about window
+/// Dialog callback for our about window
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     // Have to be global because we need to destroy our font resources eventually
     #[allow(non_upper_case_globals)]
@@ -376,7 +390,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam:
                 let vers = format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes).to_string();
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
-                segoe_bold_9.set_text(IDC_VER, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
                 segoe_bold_9.set_text(IDC_BUILT, w!(""), w!(""));
                 segoe_bold_9.set_text(IDC_ST_AUTHOR, w!(""), w!(""));
                 segoe_bold_9.set_text(IDC_ST_COPY, w!(""), w!(""));
@@ -481,7 +495,7 @@ impl WindowsControlText {
             if tooltip_text != w!("") {
                 let tt_hwnd = CreateWindowExA(
                     Default::default(),
-                    PCSTR("tooltips_class32\0".as_ptr()),
+                    PCSTR("tooltips_class32\0".as_ptr()), // Have to add a trailling NULL or this call wont work since Rust does't typicaally add NULLs but windows likes them
                     None,
                     WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP), // | WINDOW_STYLE(TTS_BALLOON), // I don't really like the balloon style, but this is how we'd define it
                     CW_USEDEFAULT,
@@ -522,6 +536,8 @@ impl WindowsControlText {
     }
 }
 /// Convert a Rust utf8 string into a windows utf16 string
+///
+/// Possibly redundant now we have the !w macro which seems to do much the same thing?
 fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
     utf8_in.encode_utf16().collect()
 }

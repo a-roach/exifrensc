@@ -65,7 +65,7 @@ dependencies = [
 
 [[package]]
 name = "exifrensc"
-version = "0.4.20220617"
+version = "0.4.20221006"
 dependencies = [
  "chrono",
  "embed-resource",
