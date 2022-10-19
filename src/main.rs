@@ -1,5 +1,6 @@
 #![allow(unused_parens)]
 #![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
 
 use core::mem::transmute;
 use std::convert::TryInto;
@@ -8,22 +9,52 @@ use std::fs::File;
 use std::io::Write;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
-use std::slice::from_raw_parts;
-use std::{env, mem, slice, str};
+use std::thread;
+use std::{env, mem, slice, slice::from_raw_parts, str};
 use windows::core::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::{Controls::*, Input::KeyboardAndMouse::EnableWindow, Shell::*, WindowsAndMessaging::*};
 use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
 use chrono::{prelude::Local, TimeZone};
+use minreq;
 use rusqlite::{Connection, Result};
+use tiny_http::{Response, Server};
+use urlencoding::decode;
+
 
 include!("resource_defs.rs");
 
-// Global Variables
-#[allow(non_upper_case_globals)]
-static mut settings_sqlite: String = String::new();
+// Custom Macros
 
+macro_rules! Warning {
+    ($a:expr) => {
+        unsafe {
+            MessageBoxA(None, s!($a), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
+        }
+    };
+}
+
+macro_rules! Fail {
+    ($a:expr) => {
+        unsafe {
+            MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
+        }
+    };
+}
+
+// Global Variables
+static mut path_to_settings_sqlite: String = String::new();
+//static dummy_mem_152:[u8;152]=[1; 152];
+
+/// Program's main entry point.
+///
+/// main() will:
+///    * make sure that the LOCALAPPDATA exists and has a directory in it called exifrensc
+///    * see if settings.sqlite exists, if not create it by copying it from the resource stub
+///    * launch our database server thread (which is an sqlite in memory database)
+///    * initialise common controls
+///    * launch our window  
 fn main() -> Result<()> {
     println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
     /*
@@ -36,7 +67,6 @@ fn main() -> Result<()> {
         }
     */
 
-    #[allow(non_upper_case_globals)]
     let mut test_studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
     if test_studio.existant() == true {
@@ -49,14 +79,12 @@ fn main() -> Result<()> {
      * If we don't have it yet, then we will try to create it
      */
 
-    let mut my_appdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+    let mut my_appdata: String = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
     my_appdata.push_str("\\exifrensc");
     let test_if_we_have_our_app_data_directory_set_up = PathBuf::from(&my_appdata);
     if !test_if_we_have_our_app_data_directory_set_up.is_dir() {
         if let Err(_e) = fs::create_dir_all(test_if_we_have_our_app_data_directory_set_up) {
-            unsafe {
-                MessageBoxA(None, s!("Failed to create $LOCALAPPDATA\\exifrensc"), s!("Error"), MB_OK | MB_ICONERROR);
-            }
+            Fail!("Failed to create $LOCALAPPDATA\\exifrensc");
             panic!("Failed to create $LOCALAPPDATA\\exifrensc");
         }
 
@@ -65,9 +93,7 @@ fn main() -> Result<()> {
          */
 
         if !PathBuf::from(&my_appdata).is_dir() {
-            unsafe {
-                MessageBoxA(None, s!("Could not find and/or create $LOCALAPPDATA\\exifrensc"), s!("Error"), MB_OK | MB_ICONERROR);
-            }
+            Fail!("Could not find and/or create $LOCALAPPDATA\\exifrensc");
             panic!("Still can not find $LOCALAPPDATA");
         }
     }
@@ -81,12 +107,12 @@ fn main() -> Result<()> {
      */
 
     unsafe {
-        settings_sqlite = my_appdata + ("\\settings.sqlite");
-        if (!Path::new(&settings_sqlite).exists()) {
-            ResourceSave(IDB_SETTINGS, "SQLITE\0", &settings_sqlite); // id: i32, section: &str, filename: &str
+        path_to_settings_sqlite = my_appdata + ("\\settings.sqlite");
+        if (!Path::new(&path_to_settings_sqlite).exists()) {
+            ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite); // id: i32, section: &str, filename: &str
 
-            if (!Path::new(&settings_sqlite).exists()) {
-                MessageBoxA(None, s!("Could not create the settings file."), s!("Error"), MB_OK | MB_ICONERROR);
+            if (!Path::new(&path_to_settings_sqlite).exists()) {
+                Fail!("Could not create the settings file.");
                 panic!("Still can not create the settings file");
             }
         }
@@ -95,6 +121,10 @@ fn main() -> Result<()> {
         if let Ok(hinst) = GetModuleHandleA(None) {
             let main_hwnd = CreateDialogParamA(Some(hinst), PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
             let mut message = MSG::default();
+
+            let db_thread = thread::spawn(move || {
+                mem_db(main_hwnd);
+            });
 
             while GetMessageA(&mut message, HWND(0), 0, 0).into() {
                 if (IsDialogMessageA(main_hwnd, &message) == false) {
@@ -109,8 +139,8 @@ fn main() -> Result<()> {
 
 /// Dialog callback function for our main window
 extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
-    #[allow(non_upper_case_globals)]
     static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
+
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg as u32 {
@@ -122,17 +152,17 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
                 segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 16, FW_NORMAL.0, false);
-                segoe_mdl2_assets.set_text(IDC_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)"));
-                segoe_mdl2_assets.set_text(IDC_ADD_FOLDER, w!("\u{ED25}"), w!("Add a folder full of photos"));
-                segoe_mdl2_assets.set_text(IDC_SAVE, w!("\u{E74E}"), w!("Save changes to names"));
-                segoe_mdl2_assets.set_text(IDC_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo"));
-                segoe_mdl2_assets.set_text(IDC_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list"));
-                segoe_mdl2_assets.set_text(IDC_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list"));
-                segoe_mdl2_assets.set_text(IDC_INFO, w!("\u{E946}"), w!("About"));
-                segoe_mdl2_assets.set_text(IDC_SETTINGS, w!("\u{F8B0}"), w!("Settings"));
-                segoe_mdl2_assets.set_text(IDC_SYNC, w!("\u{EDAB}"), w!("Resync names"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_ADD_FOLDER, w!("\u{ED25}"), w!("Add a folder full of photos"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_SAVE, w!("\u{E74E}"), w!("Save changes to names"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_INFO, w!("\u{E946}"), w!("About"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_SETTINGS, w!("\u{F8B0}"), w!("Settings"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_SYNC, w!("\u{EDAB}"), w!("Resync names"));
 
-                //DragAcceptFiles(GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, true);
+                //DragAcceptFiles(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST) as HWND, true);
 
                 /*
                  * If we wanted to set up a list box with files and directories, this is how we would do it.
@@ -154,7 +184,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                  */
 
                 SendMessageW(
-                    GetDlgItem(hwnd, IDC_FILE_LIST),
+                    GetDlgItem(hwnd, IDC_MAIN_FILE_LIST),
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
                     WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
                     LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
@@ -163,7 +193,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let mut lvC = LVCOLUMNA {
                     mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
                     fmt: LVCFMT_LEFT,
-                    cx: convert_x_to_client_coords(IDC_FILE_LIST_R.width / 4),
+                    cx: convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.width / 4),
                     pszText: transmute(utf8_to_utf16("Original File Name\0").as_ptr()),
                     cchTextMax: 0,
                     iSubItem: 0,
@@ -174,17 +204,17 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     cxIdeal: 55,
                 };
 
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
                 lvC.iSubItem = 1;
                 lvC.pszText = transmute(utf8_to_utf16("Changed File Name\0").as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
 
                 lvC.pszText = transmute(utf8_to_utf16("File Created Time\0").as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
 
                 lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
 
                 0
             }
@@ -196,23 +226,23 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     segoe_mdl2_assets.destroy();
                     PostQuitMessage(0);
-                } else if wParam as i32 == IDC_ADD_PICTURE {
+                } else if wParam as i32 == IDC_MAIN_ADD_PICTURE {
                     LoadFile();
-                } else if wParam as i32 == IDC_ADD_FOLDER {
+                } else if wParam as i32 == IDC_MAIN_ADD_FOLDER {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_SAVE {
+                } else if wParam as i32 == IDC_MAIN_SAVE {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_SAVE {
+                } else if wParam as i32 == IDC_MAIN_DELETE {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_DELETE {
+                } else if wParam as i32 == IDC_MAIN_ERASE {
+                    let o = minreq::get("http://127.0.0.1:7878/aero?planejellyfor me").with_header("Accept", "text/plain").send().expect("minreq send failed");
+                    let s = o.as_str().unwrap();
+                    print!("{}", s);
+                } else if wParam as i32 == IDC_MAIN_SYNC {
                     LoadDirectory();
-                } else if wParam as i32 == IDC_ERASE {
-                    LoadDirectory();
-                } else if wParam as i32 == IDC_SYNC {
-                    LoadDirectory();
-                } else if wParam as i32 == IDC_SETTINGS {
+                } else if wParam as i32 == IDC_MAIN_SETTINGS {
                     CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
-                } else if wParam as i32 == IDC_INFO {
+                } else if wParam as i32 == IDC_MAIN_INFO {
                     CreateDialogParamA(hinst, PCSTR(IDD_ABOUT as *mut u8), HWND(0), Some(about_dlg_proc), LPARAM(0));
                 }
 
@@ -235,7 +265,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 // if MapDialogRect(hwnd,&mut *borrowed_rect) == true
                 //    {
-                //     SetWindowPos( GetDlgItem(hwnd, IDC_FILE_LIST) as HWND, HWND_TOP,
+                //     SetWindowPos( GetDlgItem(hwnd, IDC_MAIN_FILE_LIST) as HWND, HWND_TOP,
                 //                   borrowed_rect.left,borrowed_rect.top,
                 //                   borrowed_rect.right-borrowed_rect.left,borrowed_rect.bottom-borrowed_rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
                 //     }
@@ -245,32 +275,32 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 // I am not sure what effects this might have on other monitors with different resolutions of DPI settings.
 
                 SetWindowPos(
-                    GetDlgItem(hwnd, IDC_FILE_LIST_R.id) as HWND,
+                    GetDlgItem(hwnd, IDC_MAIN_FILE_LIST_R.id) as HWND,
                     HWND_TOP,
-                    convert_x_to_client_coords(IDC_FILE_LIST_R.x),
-                    convert_y_to_client_coords(IDC_FILE_LIST_R.y),
-                    new_width - convert_x_to_client_coords(IDC_FILE_LIST_R.x + 8),
-                    new_height - convert_y_to_client_coords(IDC_FILE_LIST_R.y + 8),
+                    convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.x),
+                    convert_y_to_client_coords(IDC_MAIN_FILE_LIST_R.y),
+                    new_width - convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.x + 8),
+                    new_height - convert_y_to_client_coords(IDC_MAIN_FILE_LIST_R.y + 8),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
                 SetWindowPos(
-                    GetDlgItem(hwnd, IDC_PATTERN_R.id) as HWND,
+                    GetDlgItem(hwnd, IDC_MAIN_PATTERN_R.id) as HWND,
                     HWND_TOP,
-                    convert_x_to_client_coords(IDC_PATTERN_R.x),
-                    convert_y_to_client_coords(IDC_PATTERN_R.y),
-                    new_width - convert_x_to_client_coords(IDC_PATTERN_R.x + 26),
-                    convert_y_to_client_coords(IDC_PATTERN_R.height),
+                    convert_x_to_client_coords(IDC_MAIN_PATTERN_R.x),
+                    convert_y_to_client_coords(IDC_MAIN_PATTERN_R.y),
+                    new_width - convert_x_to_client_coords(IDC_MAIN_PATTERN_R.x + 26),
+                    convert_y_to_client_coords(IDC_MAIN_PATTERN_R.height),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
                 SetWindowPos(
-                    GetDlgItem(hwnd, IDC_SYNC_R.id) as HWND,
+                    GetDlgItem(hwnd, IDC_MAIN_SYNC_R.id) as HWND,
                     HWND_TOP,
                     new_width - convert_x_to_client_coords(23),
-                    convert_y_to_client_coords(IDC_PATTERN_R.y - 1),
-                    convert_x_to_client_coords(IDC_SYNC_R.width),
-                    convert_y_to_client_coords(IDC_SYNC_R.height),
+                    convert_y_to_client_coords(IDC_MAIN_PATTERN_R.y - 1),
+                    convert_x_to_client_coords(IDC_MAIN_SYNC_R.width),
+                    convert_y_to_client_coords(IDC_MAIN_SYNC_R.height),
                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
@@ -319,31 +349,31 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 /*
                  * Set up our combo boxes
                  */
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Add\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Skip\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Add\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Skip\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("~\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("No delimeter\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("~\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("No delimeter\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(0), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("12345\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("1\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("02\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("003\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(2), LPARAM(0));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("12345\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("1\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("02\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("003\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(2), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("the date shot in the EXIF data\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_DATE_SHOOT_PRIMARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("the date shot in the EXIF data\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
 
                 /*
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
@@ -353,18 +383,28 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 let mut NX_Studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
                 if NX_Studio.existant() == false {
-                    EnableWindow(GetDlgItem(hwnd, IDC_NX_STUDIO), false);
-                    SendMessageA(GetDlgItem(hwnd, IDC_NX_STUDIO), BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
+                    EnableWindow(GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO), false);
+                    SendMessageA(GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO), BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
                 }
                 0
             }
 
             WM_COMMAND => {
-                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
+                let mut wParam: u64 = transmute(wParam);
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
-                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     EndDialog(hwnd, 0);
+                } else if wParam as i32 == IDC_PREFS_APPLY {
+                } else if wParam as i32 == IDC_PREFS_SAVE_SETTING {
+                } else if wParam as i32 == IDC_PREFS_RESET_SETTING {
+                    /* To "reset" all we do is write over the top of the settings file in the local app directory
+                     * with the default settings file, which is saved in the resource stub.
+                     */
+                    if MessageBoxA(None, s!("Are you sure you want to reset the settings?"), s!("I want to know!"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
+                        ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite);
+                        EndDialog(hwnd, 0);
+                    }
                 }
 
                 0
@@ -409,19 +449,19 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 let vers = format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes).to_string();
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
-                segoe_bold_9.set_text(IDC_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
-                segoe_bold_9.set_text(IDC_BUILT, w!(""), w!(""));
-                segoe_bold_9.set_text(IDC_ST_AUTHOR, w!(""), w!(""));
-                segoe_bold_9.set_text(IDC_ST_COPY, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_ABOUT_ST_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
+                segoe_bold_9.set_text(IDC_ABOUT_BUILT, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_ABOUT_ST_AUTHOR, w!(""), w!(""));
+                segoe_bold_9.set_text(IDC_ABOUT_ST_COPY, w!(""), w!(""));
 
                 segoe_bold_italic_13.register_font(hwnd, s!("Segoe UI"), 13, FW_BOLD.0, true);
                 segoe_bold_italic_13.set_text(IDC_ABOUT_TITLE, w!(""), w!(""));
 
                 segoe_italic_10.register_font(hwnd, s!("Segoe UI"), 10, FW_NORMAL.0, true);
-                segoe_italic_10.set_text(IDC_DESCRIPTION, w!(""), w!(""));
+                segoe_italic_10.set_text(IDC_ABOUT_DESCRIPTION, w!(""), w!(""));
 
-                SetDlgItemTextA(hwnd, IDC_VERSION, PCSTR(vers.as_ptr()));
-                SetDlgItemTextA(hwnd, IDC_BUILDDATE, PCSTR(iso_8601.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_ABOUT_VERSION, PCSTR(vers.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_ABOUT_BUILDDATE, PCSTR(iso_8601.as_ptr()));
 
                 0
             }
@@ -702,6 +742,8 @@ impl NxStudioDB {
 }
 
 /// Function for saving a resource from the executable. Prints out an error message if not successful.
+///
+/// Rust's create file will, by default overwrite any existing files, which happens if the reset settings button is pressed.
 fn ResourceSave(id: i32, section: &str, filename: &str) {
     unsafe {
         let the_asset: Result<_, _> = FindResourceA(HINSTANCE(0), PCSTR(id as *mut u8), PCSTR(section.as_ptr()));
@@ -713,11 +755,45 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
                 let dwSize: usize = SizeofResource(HINSTANCE(0), ResourceHandle).try_into().unwrap();
                 let slice = slice::from_raw_parts(ptMem as *const u8, dwSize);
 
-                let mut output = File::create(filename).expect("Create file failed");
-                output.write_all(&slice[0..dwSize]).expect("Write failed");
+                let mut output = File::create(filename).expect("Create file failed. 😮");
+                output.write_all(&slice[0..dwSize]).expect("Write failed. 😥");
                 drop(output);
             }
             Err(e) => println!("Error {}", e),
         }
+    }
+}
+
+/// Our web service to handle internal database requests
+///
+// [Header { field: HeaderField("Host"), value: "127.0.0.1:7878" }]
+fn mem_db(hwnd: HWND) {
+    let server = Server::http("127.0.0.1:7878").expect("Setting up the internal HTTP server failed.😫");
+    let mut host: String = String::new();
+
+    for request in server.incoming_requests() {
+        for header in request.headers() {
+            if header.field.as_str() == "Host" {
+                host = header.value.to_string();
+                break;
+            }
+        }
+
+        if host != "127.0.0.1:7878" {
+            Fail!("A request to mem_db() came from an unrecognised external souruce.\r\rAborting!");
+            unsafe {
+                SendMessageA(hwnd, WM_COMMAND, WPARAM(2), LPARAM(0)); // push the cancel button in our main dialog
+            }
+            panic!("mem_db() terminated after receiving a request from an unknown foriegn source.😤");
+        }
+
+        let command = decode(request.url().trim_start_matches("/")).unwrap();
+
+        println!("{}", command);
+
+        println!("received request! method: {:?}, url: {:?}, headers: {:?}", request.method(), request.url(), request.headers());
+
+        let response = Response::from_string("hello world");
+        request.respond(response);
     }
 }
