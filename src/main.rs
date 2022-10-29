@@ -400,26 +400,31 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 let mut wParam: u64 = transmute(wParam);
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
-                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
-                    EndDialog(hwnd, 0);
-                } else if wParam as i32 == IDC_PREFS_APPLY {
-                    ApplySettings(hwnd);
-                    EndDialog(hwnd, 0);
-                } else if wParam as i32 == IDC_PREFS_SAVE_SETTING {
-                    ApplySettings(hwnd);
-                    SaveSettings();
-                    EndDialog(hwnd, 0);
-                } else if wParam as i32 == IDC_PREFS_RESET_SETTING {
-                    /* To "reset" all we do is write over the top of the settings file in the local app directory
-                     * with the default settings file, which is saved in the resource stub.
-                     */
-                    if MessageBoxA(None, s!("Are you sure you want to reset the settings?"), s!("I want to know!"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
-                        ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite);
-                        ReloadSettings();
+                match wParam as i32 {
+                    IDC_PREFS_CANCEL => {
                         EndDialog(hwnd, 0);
                     }
+                    IDC_PREFS_APPLY => {
+                        ApplySettings(hwnd);
+                        EndDialog(hwnd, 0);
+                    }
+                    IDC_PREFS_SAVE_SETTING => {
+                        ApplySettings(hwnd);
+                        SaveSettings();
+                        EndDialog(hwnd, 0);
+                    }
+                    IDC_PREFS_RESET_SETTING => {
+                        /* To "reset" all we do is write over the top of the settings file in the local app directory
+                         * with the default settings file, which is saved in the resource stub.
+                         */
+                        if MessageBoxA(None, s!("Are you sure you want to reset the settings?"), s!("I want to know!"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
+                            ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite);
+                            ReloadSettings();
+                            EndDialog(hwnd, 0);
+                        }
+                    }
+                    _ => {}
                 }
-
                 0
             }
 
