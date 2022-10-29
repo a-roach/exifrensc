@@ -19,7 +19,7 @@ use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
 use chrono::{prelude::Local, TimeZone};
 use minreq;
 use rand::prelude::*;
-use rusqlite::{Connection, Result};
+use rusqlite::{params, Connection, Result};
 use tiny_http::{Response, Server};
 use urlencoding::decode;
 
@@ -47,7 +47,7 @@ macro_rules! Fail {
 static mut path_to_settings_sqlite: String = String::new();
 static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
                                              //static dummy_mem_152:[u8;152]=[1; 152];
-static mut EXTERMINATE: bool = false; // used to signal when our web server has been potentially compromised
+static mut EXITERMINATE: bool = false; // used to signal when our web server has been potentially compromised
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
 
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
                     TranslateMessage(&message);
                     DispatchMessageA(&message);
                 }
-                if (EXTERMINATE == true) {
+                if (EXITERMINATE == true) {
                     SendMessageA(main_hwnd, WM_COMMAND, WPARAM(2), LPARAM(0)); // push the cancel button in our main dialog
                 }
             }
@@ -240,7 +240,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 } else if wParam as i32 == IDC_MAIN_SAVE {
                     LoadDirectory();
                 } else if wParam as i32 == IDC_MAIN_DELETE {
-                    LoadDirectory();
+                    GetIntSetting(21008);
                 } else if wParam as i32 == IDC_MAIN_ERASE {
                     let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
                     let s = o.as_str().unwrap();
@@ -358,29 +358,29 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                  */
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Add\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Skip\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(0), LPARAM(0));
-
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
+                
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("~\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("No delimeter\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_ADD)), LPARAM(0));
 
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("12345\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("1\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("02\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("003\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(2), LPARAM(0));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
 
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("the date shot in the EXIF data\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
 
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(0), LPARAM(0));
+                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
 
                 /*
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
@@ -403,13 +403,28 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     EndDialog(hwnd, 0);
                 } else if wParam as i32 == IDC_PREFS_APPLY {
+                    SetIntSetting(IDC_PREFS_ON_CONFLICT,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    EndDialog(hwnd, 0);
                 } else if wParam as i32 == IDC_PREFS_SAVE_SETTING {
+                    SetIntSetting(IDC_PREFS_ON_CONFLICT,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    SaveSettings();
+                    EndDialog(hwnd, 0);
+
                 } else if wParam as i32 == IDC_PREFS_RESET_SETTING {
                     /* To "reset" all we do is write over the top of the settings file in the local app directory
                      * with the default settings file, which is saved in the resource stub.
                      */
                     if MessageBoxA(None, s!("Are you sure you want to reset the settings?"), s!("I want to know!"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
                         ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite);
+                        ReloadSettings();
                         EndDialog(hwnd, 0);
                     }
                 }
@@ -794,41 +809,134 @@ fn mem_db() {
     }
 
     /*
-     *  Server loop
+     * Next we will open up our in-memory sqlite database which will eventually be used for lots of things.
+     * After opening it we will attache the settings database to it and copy the settings across.
      */
-    for request in server.incoming_requests() {
-        println!("received request! method: {:?}, url: {:?}, headers: {:?}", request.method(), request.url(), request.headers());
+    if let Ok(db) = Connection::open("c:/dev/in_memory.sqlite") {
+        // Used for debugging
+ //           if let Ok(db) = Connection::open_in_memory() { // Used for production
+ReloadSettings_(&db);
 
         /*
-         *  Check the headers sent to us to ensure the request has come from our program and not somewhere else.
-         *  We check firstly to see if its come from localhost, then make sure it also has sent the secret bonafide key.
+         *  Server loop
          */
-        for header in request.headers() {
-            if header.field.as_str() == "Host" {
-                host = header.value.to_string();
-            } else if header.field.as_str() == "X-Bonafide" {
-                bonafide = header.value.to_string();
+        for request in server.incoming_requests() {
+            println!("received request! method: {:?}, url: {:?}, headers: {:?}", request.method(), request.url(), request.headers());
+
+            /*
+             *  Check the headers sent to us to ensure the request has come from our program and not somewhere else.
+             *  We check firstly to see if its come from localhost, then make sure it also has sent the secret bonafide key.
+             */
+            for header in request.headers() {
+                if header.field.as_str() == "Host" {
+                    host = header.value.to_string();
+                } else if header.field.as_str() == "X-Bonafide" {
+                    bonafide = header.value.to_string();
+                }
             }
-        }
 
-        unsafe {
-            if bonafide != BONAFIDE || host != HOST {
-                Fail!("A request to mem_db() came from an UNVERIFIED souruce.\r\rAborting!");
-                EXTERMINATE = true;
-                panic!("mem_db() terminated after receiving a request from an unknown foriegn source.😤");
+            unsafe {
+                if bonafide != BONAFIDE || host != HOST {
+                    Fail!("A request to mem_db() came from an UNVERIFIED or UNKNOWN souruce.😲\r\rAborting!");
+                    EXITERMINATE = true;
+                    panic!("mem_db() terminated after receiving a request from an unknown or foriegn source.😤");
+                }
             }
+
+            let command = decode(request.url().trim_start_matches("/")).unwrap();
+            let mut response = Response::from_string("Not cool");
+
+            if command.starts_with("GetIntSetting") == true {
+                let cmd = format!("SELECT value FROM settings where ID={}", command.get(14..).expect("Extracting ID failed."));
+                let mut stmt = db.prepare(&cmd).unwrap();
+                let answer = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
+                response = Response::from_string(format!("{}", answer));
+            
+            } else if command.starts_with("SetIntSetting") == true {
+                let value_delimeter=command.rfind('=').unwrap();
+                let value = command.get(value_delimeter+1 ..).unwrap();
+                let id = command.get(14..value_delimeter).unwrap();
+                let cmd = format!("UPDATE settings SET value={} WHERE id={};",value,id);
+                println!("{}",cmd);
+                db.execute(&cmd, []);
+                response = Response::from_string("Okay");
+
+            } else if command.starts_with("SaveSettings") == true {
+                SaveSettings_(&db);
+                response = Response::from_string("Okay");
+
+            } else if command.starts_with("ReloadSettings") == true {
+                ReloadSettings_(&db);
+                response = Response::from_string("Okay");
+            }
+
+
+            // Generate a new key for the next request
+            unsafe {
+                BONAFIDE = format!("{}", rng.gen_range(0..65535));
+            }
+            request.respond(response);
         }
-
-        let command = decode(request.url().trim_start_matches("/")).unwrap();
-
-        println!("{}", command);
-
-        let response = Response::from_string("hello world");
-
-        // Generate a new key for the next request
-        unsafe {
-            BONAFIDE = format!("{}", rng.gen_range(0..65535));
-        }
-        request.respond(response);
+    } else {
+        Fail!("Could not start internal database service. 😯");
     }
+}
+
+/// Function to get an integer value from the settings database
+fn GetIntSetting(id: i32) -> usize {
+    unsafe {
+        let cmd = format!("{}/GetIntSetting={}", HOST_URL.to_owned(), id);
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetSetting() failed");
+        answer.as_str().unwrap().parse::<usize>().unwrap()
+    }
+}
+
+/// Function to get an integer value from the settings database
+fn SetIntSetting(id: i32, value: isize) {
+    unsafe {
+        let cmd = format!("{}/SetIntSetting={}={}", HOST_URL.to_owned(), id,value);
+        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("SetIntSetting() failed");
+    }
+}
+
+
+/// Wrapper function to reload settings database from disc
+fn ReloadSettings() {
+    unsafe {
+        let cmd = format!("{}/ReloadSettings", HOST_URL.to_owned());
+        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetSetting() failed");
+    }
+}
+
+/// Function to reload the settings from disc
+fn ReloadSettings_(db: &Connection)
+{
+    db.execute("DROP TABLE 'settings';", []);
+    unsafe {
+        let cmd = format!("ATTACH DATABASE '{}' AS SETTINGS;", path_to_settings_sqlite);
+        db.execute(&cmd, []);
+    }
+    db.execute("CREATE TABLE 'settings' (name,ID,value)", []);
+    db.execute("INSERT INTO main.settings SELECT * FROM settings.settings;", []);
+    db.execute("DETACH DATABASE SETTINGS", []);
+}
+
+/// Wrapper function to savd the settings to disc
+fn SaveSettings() {
+    unsafe {
+        let cmd = format!("{}/SaveSettings", HOST_URL.to_owned());
+        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetSetting() failed");
+    }
+}
+
+/// Function to savd the settings to disc
+fn SaveSettings_(db: &Connection)
+{
+    unsafe {
+        let cmd = format!("ATTACH DATABASE '{}' AS SETTINGS;", path_to_settings_sqlite);
+        db.execute(&cmd, []);
+    }
+    db.execute("DELETE FROM settings.settings WHERE ID IN (SELECT ID FROM settings.settings);", []);
+    db.execute("INSERT INTO settings.settings SELECT * FROM main.settings;", []);
+    db.execute("DETACH DATABASE SETTINGS", []);
 }
