@@ -359,7 +359,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Add\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Skip\0").as_ptr())));
                 SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
-                
+
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
@@ -403,21 +403,12 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     EndDialog(hwnd, 0);
                 } else if wParam as i32 == IDC_PREFS_APPLY {
-                    SetIntSetting(IDC_PREFS_ON_CONFLICT,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    ApplySettings(hwnd);
                     EndDialog(hwnd, 0);
                 } else if wParam as i32 == IDC_PREFS_SAVE_SETTING {
-                    SetIntSetting(IDC_PREFS_ON_CONFLICT,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-                    SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY,SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+                    ApplySettings(hwnd);
                     SaveSettings();
                     EndDialog(hwnd, 0);
-
                 } else if wParam as i32 == IDC_PREFS_RESET_SETTING {
                     /* To "reset" all we do is write over the top of the settings file in the local app directory
                      * with the default settings file, which is saved in the resource stub.
@@ -814,8 +805,8 @@ fn mem_db() {
      */
     if let Ok(db) = Connection::open("c:/dev/in_memory.sqlite") {
         // Used for debugging
- //           if let Ok(db) = Connection::open_in_memory() { // Used for production
-ReloadSettings_(&db);
+        //           if let Ok(db) = Connection::open_in_memory() { // Used for production
+        ReloadSettings_(&db);
 
         /*
          *  Server loop
@@ -851,31 +842,30 @@ ReloadSettings_(&db);
                 let mut stmt = db.prepare(&cmd).unwrap();
                 let answer = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
                 response = Response::from_string(format!("{}", answer));
-            
+                //
             } else if command.starts_with("SetIntSetting") == true {
-                let value_delimeter=command.rfind('=').unwrap();
-                let value = command.get(value_delimeter+1 ..).unwrap();
+                let value_delimeter = command.rfind('=').unwrap();
+                let value = command.get(value_delimeter + 1..).unwrap();
                 let id = command.get(14..value_delimeter).unwrap();
-                let cmd = format!("UPDATE settings SET value={} WHERE id={};",value,id);
-                println!("{}",cmd);
-                db.execute(&cmd, []);
-                response = Response::from_string("Okay");
+                let cmd = format!("UPDATE settings SET value={} WHERE id={};", value, id);
 
+                db.execute(&cmd, []).expect("SetIntSetting() failed.");
+                response = Response::from_string("Okay");
+                //
             } else if command.starts_with("SaveSettings") == true {
                 SaveSettings_(&db);
                 response = Response::from_string("Okay");
-
+                //
             } else if command.starts_with("ReloadSettings") == true {
                 ReloadSettings_(&db);
                 response = Response::from_string("Okay");
             }
 
-
             // Generate a new key for the next request
             unsafe {
                 BONAFIDE = format!("{}", rng.gen_range(0..65535));
             }
-            request.respond(response);
+            request.respond(response).unwrap();
         }
     } else {
         Fail!("Could not start internal database service. 😯");
@@ -894,11 +884,10 @@ fn GetIntSetting(id: i32) -> usize {
 /// Function to get an integer value from the settings database
 fn SetIntSetting(id: i32, value: isize) {
     unsafe {
-        let cmd = format!("{}/SetIntSetting={}={}", HOST_URL.to_owned(), id,value);
+        let cmd = format!("{}/SetIntSetting={}={}", HOST_URL.to_owned(), id, value);
         minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("SetIntSetting() failed");
     }
 }
-
 
 /// Wrapper function to reload settings database from disc
 fn ReloadSettings() {
@@ -908,20 +897,22 @@ fn ReloadSettings() {
     }
 }
 
-/// Function to reload the settings from disc
-fn ReloadSettings_(db: &Connection)
-{
-    db.execute("DROP TABLE 'settings';", []);
+/// Function to reload the settings database from disc
+fn ReloadSettings_(db: &Connection) {
     unsafe {
-        let cmd = format!("ATTACH DATABASE '{}' AS SETTINGS;", path_to_settings_sqlite);
-        db.execute(&cmd, []);
+        let cmd = format!(
+            r#"DROP TABLE 'settings';
+            CREATE TABLE 'settings' (name,ID,value);
+            ATTACH DATABASE '{}' AS SETTINGS;
+            INSERT INTO main.settings SELECT * FROM settings.settings;
+            DETACH DATABASE SETTINGS;"#,
+            path_to_settings_sqlite
+        );
+        db.execute_batch(&cmd).expect("ReloadSettings_() failed.");
     }
-    db.execute("CREATE TABLE 'settings' (name,ID,value)", []);
-    db.execute("INSERT INTO main.settings SELECT * FROM settings.settings;", []);
-    db.execute("DETACH DATABASE SETTINGS", []);
 }
 
-/// Wrapper function to savd the settings to disc
+/// Wrapper function to save the settings to disc
 fn SaveSettings() {
     unsafe {
         let cmd = format!("{}/SaveSettings", HOST_URL.to_owned());
@@ -929,14 +920,27 @@ fn SaveSettings() {
     }
 }
 
-/// Function to savd the settings to disc
-fn SaveSettings_(db: &Connection)
-{
+/// Function to save the settings to disc
+fn SaveSettings_(db: &Connection) {
     unsafe {
-        let cmd = format!("ATTACH DATABASE '{}' AS SETTINGS;", path_to_settings_sqlite);
-        db.execute(&cmd, []);
+        let cmd = format!(
+            r#"ATTACH DATABASE '{}' AS SETTINGS;
+            DELETE FROM settings.settings WHERE id IN (SELECT id FROM settings.settings);
+            INSERT INTO settings.settings SELECT * FROM main.settings;
+            DETACH DATABASE SETTINGS"#,
+            path_to_settings_sqlite
+        );
+        db.execute_batch(&cmd).expect("SaveSettings_() failed.");
     }
-    db.execute("DELETE FROM settings.settings WHERE ID IN (SELECT ID FROM settings.settings);", []);
-    db.execute("INSERT INTO settings.settings SELECT * FROM main.settings;", []);
-    db.execute("DETACH DATABASE SETTINGS", []);
+}
+
+/// Transfer settings from the dialog boxes in the preferences screen to the in memory settings database
+fn ApplySettings(hwnd: HWND) {
+    unsafe {
+        SetIntSetting(IDC_PREFS_ON_CONFLICT, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+    }
 }
