@@ -233,26 +233,38 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     segoe_mdl2_assets.destroy();
                     PostQuitMessage(0);
-                } else if wParam as i32 == IDC_MAIN_ADD_PICTURE {
-                    LoadFile();
-                } else if wParam as i32 == IDC_MAIN_ADD_FOLDER {
-                    LoadDirectory();
-                } else if wParam as i32 == IDC_MAIN_SAVE {
-                    LoadDirectory();
-                } else if wParam as i32 == IDC_MAIN_DELETE {
-                    GetIntSetting(21008);
-                } else if wParam as i32 == IDC_MAIN_ERASE {
-                    let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
-                    let s = o.as_str().unwrap();
-                    print!("{}", s);
-                } else if wParam as i32 == IDC_MAIN_SYNC {
-                    LoadDirectory();
-                } else if wParam as i32 == IDC_MAIN_SETTINGS {
-                    CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
-                } else if wParam as i32 == IDC_MAIN_INFO {
-                    CreateDialogParamA(hinst, PCSTR(IDD_ABOUT as *mut u8), HWND(0), Some(about_dlg_proc), LPARAM(0));
+                } else {
+                    match wParam as i32 {
+                        IDC_MAIN_ADD_PICTURE => {
+                            LoadFile();
+                        }
+                        IDC_MAIN_ADD_FOLDER => {
+                            LoadFile();
+                        }
+                        IDC_MAIN_SAVE => {
+                            LoadFile();
+                        }
+                        IDC_MAIN_DELETE => {
+                            LoadFile();
+                        }
+                        IDC_MAIN_ERASE => {
+                            let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
+                            let s = o.as_str().unwrap();
+                                }
+                        IDC_MAIN_SYNC => {
+                            LoadFile();
+                        }
+                        IDC_MAIN_SETTINGS => {
+                            CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
+                        }
+    
+                        IDC_MAIN_INFO => {
+                            CreateDialogParamA(hinst, PCSTR(IDD_ABOUT as *mut u8), HWND(0), Some(about_dlg_proc), LPARAM(0));
+                        }
+                        _ => {}
+                    }
                 }
-
+                
                 0
             }
 
@@ -389,9 +401,20 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 #[allow(non_upper_case_globals)]
                 let mut NX_Studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
+                let NX_stu_DlgItem: HWND = GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO);
+
                 if NX_Studio.existant() == false {
-                    EnableWindow(GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO), false);
-                    SendMessageA(GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO), BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
+                    EnableWindow(NX_stu_DlgItem, false);
+                    SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
+                }
+                else{
+                    if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 
+                    {
+                        SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_CHECKED.0.try_into().unwrap()), LPARAM(0));
+                    }
+                    else{
+                        SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
+                    }
                 }
                 0
             }
@@ -947,5 +970,6 @@ fn ApplySettings(hwnd: HWND) {
         SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_NX_STUDIO, IsDlgButtonChecked(hwnd,IDC_PREFS_NX_STUDIO).try_into().unwrap());
     }
 }
