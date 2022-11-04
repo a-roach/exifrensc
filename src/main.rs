@@ -13,8 +13,10 @@ use std::thread;
 use std::{env, mem, slice, slice::from_raw_parts, str};
 use windows::core::*;
 use windows::Win32::System::Com::*;
+use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::{Controls::*, Input::KeyboardAndMouse::EnableWindow, Shell::*, WindowsAndMessaging::*};
 use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
+// use windows::Win32::UI::Shell::SHCreateItemInKnownFolder;
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
 use chrono::{prelude::Local, TimeZone};
 use minreq;
@@ -250,21 +252,21 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                         IDC_MAIN_ERASE => {
                             let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
                             let s = o.as_str().unwrap();
-                                }
+                        }
                         IDC_MAIN_SYNC => {
                             LoadFile();
                         }
                         IDC_MAIN_SETTINGS => {
                             CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
                         }
-    
+
                         IDC_MAIN_INFO => {
                             CreateDialogParamA(hinst, PCSTR(IDD_ABOUT as *mut u8), HWND(0), Some(about_dlg_proc), LPARAM(0));
                         }
                         _ => {}
                     }
                 }
-                
+
                 0
             }
 
@@ -337,6 +339,13 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     DragQueryFileA(hDrop, i, Some(file_name_buffer.as_mut_slice()));
                     let mut file_name = String::from_utf8_unchecked((&file_name_buffer).to_vec());
                     file_name.truncate(file_name.find('\0').unwrap());
+
+                    let test_Path = PathBuf::from(&file_name);
+                    if test_Path.is_dir() {
+                        //   AddFiles
+                    } else {
+                        // add file
+                    }
                     println!("{}", file_name);
                 }
 
@@ -406,13 +415,10 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 if NX_Studio.existant() == false {
                     EnableWindow(NX_stu_DlgItem, false);
                     SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
-                }
-                else{
-                    if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 
-                    {
+                } else {
+                    if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 {
                         SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_CHECKED.0.try_into().unwrap()), LPARAM(0));
-                    }
-                    else{
+                    } else {
                         SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
                     }
                 }
@@ -461,14 +467,14 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
 }
 
 /// Dialog callback for our about window
+///
+/// Mostly thhis is just changing fonts
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
     // Have to be global because we need to destroy our font resources eventually
-    #[allow(non_upper_case_globals)]
     static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
-    #[allow(non_upper_case_globals)]
     static mut segoe_bold_italic_13: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
-    #[allow(non_upper_case_globals)]
     static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
+
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg as u32 {
@@ -582,7 +588,7 @@ impl WindowsControlText {
     /**
      * Set the caption and tool tip text of a windows control.
      **/
-    fn set_text(&self, id: i32, caption: &HSTRING, tooltip_text: &HSTRING) {
+    fn set_text(&self, id: i32, caption: PCWSTR, tooltip_text: PCWSTR) {
         unsafe {
             let hinst = GetModuleHandleA(None).unwrap();
 
@@ -651,30 +657,95 @@ fn LoadFile() {
         // Change a few of the default options for the dialog
         file_dialog.SetTitle(w!("Choose Photos to Rename")).expect("SetTitle() failed in LoadFile()");
         file_dialog.SetOkButtonLabel(w!("Select Photos")).expect("SetOkButtonLabel() failed in LoadFile()");
-        //file_dialog.SetFileTypes();
+
+        /*
+         * Next we are going to set up the file types combo box for the file selection dialog.
+         * This is not as simple as it seems. Firstly we have to create an array of blank
+         * COMDLG_FILTERSPEC structures, we make 16 in total. Following this we will ask
+         * our in memory database to give us the file name and its specs. These have to be
+         * converted from ASCII to UTF16, and the UTF 16 is stored in a vevtor of u16.
+         * But we need a vector of u16 vectors to keep the value from being destroyed long
+         * enought for the dialog to initialise.
+         * You have no idea how long this actually took to figure out. Its kind of
+         * embarassing even thought the solution was quite simple in the end.
+         */
+        let mut file_pat: [COMDLG_FILTERSPEC; 16] = [
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+            COMDLG_FILTERSPEC { pszName: w!(""), pszSpec: w!("") },
+        ];
+
+        let mut fileNames: Vec<Vec<u16>> = Vec::new(); // File name pointers
+        let mut fileSpecs: Vec<Vec<u16>> = Vec::new(); // File Spec pointers
+
+        for i in 0..Count("idx", "file_pat")
+        // ask out database how many predefined file patterns there are
+        {
+            if i > 15 {
+                // We only accept 16 file masks (at this time), so we jump out if we hit that limit
+                break;
+            }
+
+            let mut Name: String = String::new();
+            let mut Spec: String = String::new();
+
+            GetFilePatterns(i + 1, &mut Name, &mut Spec); // retrieve from the database the values
+
+            // We need a null terminator on the string for windows
+            Name.push('\0');
+            Spec.push('\0');
+
+            // Convert the UTF8 to UTF16 (for windows) and push into a vector to keep it alive for a while
+            fileNames.push(utf8_to_utf16(&Name));
+            fileSpecs.push(utf8_to_utf16(&Spec));
+
+            // Finally populate our COMDLG_FILTERSPEC structure
+            file_pat[i].pszName = transmute(fileNames[i].as_ptr());
+            file_pat[i].pszSpec = transmute(fileSpecs[i].as_ptr());
+        }
+
+        file_dialog.SetFileTypes(&file_pat);
+
+/*         let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, KF_FLAG_DEFAULT.0.try_into().unwrap(), None).unwrap();
+        file_dialog.SetDefaultFolder(&defPath);
+ */
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options).expect("SetOptions() failed in LoadFile()");
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
-                                             /*  if let Ok(__dummy) = answer {
-                                                 let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
-                                                 let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
-                                                 let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
 
-                                                 // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
-                                                 // Really wish there was another way 😕
-                                                 let mut item_name_len: usize = 0;
-                                                 while tmp_slice[item_name_len] != 0 {
-                                                     item_name_len += 1;
-                                                 }
+        /*  if let Ok(__dummy) = answer {
+            let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
+            let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
+            let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
+
+            // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
+            // Really wish there was another way 😕
+            let mut item_name_len: usize = 0;
+            while tmp_slice[item_name_len] != 0 {
+                item_name_len += 1;
+            }
 
 
-                                                 let tmp_file_name = from_raw_parts(file_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
-                                                 let mut file_name_s = String::from_utf16(tmp_file_name).unwrap(); // convert our utf16 buffer to a rust string
-                                                 println!("{}", file_name_s);
-                                                 CoTaskMemFree(transmute(file_name.0));
-                                             } */
+            let tmp_file_name = from_raw_parts(file_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
+            let mut file_name_s = String::from_utf16(tmp_file_name).unwrap(); // convert our utf16 buffer to a rust string
+            println!("{}", file_name_s);
+            CoTaskMemFree(transmute(file_name.0));
+        } */
 
         // Multi selection version
         if let Ok(_dummy) = answer {
@@ -692,7 +763,7 @@ fn LoadFile() {
                 let tmp_file_name = from_raw_parts(file_name.0, item_name_len);
                 let mut file_name_s = String::from_utf16(tmp_file_name).unwrap();
                 println!("{}", file_name_s);
-                // CoTaskMemFree(file_name.0 as _);
+                CoTaskMemFree(Some(transmute(file_name.0))); // feel rather nervy about this - not sure this is trying to free the right thing
             }
         }
 
@@ -728,7 +799,7 @@ fn LoadDirectory() {
             let tmp_directory_name = from_raw_parts(directory_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
             let mut directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
             println!("{}", directory_name_s);
-            // CoTaskMemFree(directory_name.0.as_ref().as_ptr());
+            CoTaskMemFree(Some(transmute(directory_name.0)));
         }
 
         //file_dialog.Release();
@@ -834,7 +905,23 @@ fn mem_db() {
     if let Ok(db) = Connection::open("c:/dev/in_memory.sqlite") {
         // Used for debugging
         //           if let Ok(db) = Connection::open_in_memory() { // Used for production
+
         ReloadSettings_(&db);
+        // Create the table which will hold all of the file names
+        db.execute_batch(
+            r#"DROP TABLE IF EXISTS files;
+        CREATE TABLE files (
+            idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
+            path TEXT NOT NULL, 
+            orig_file_name TEXT, 
+            new_file_name TEXT, 
+            locked BOOL DEFAULT 0, 
+            inNXstudio BOOL DEFAULT 0,
+
+            UNIQUE(path, orig_file_name)
+        );"#,
+        )
+        .expect("Setting up the file table failed.");
 
         /*
          *  Server loop
@@ -876,7 +963,6 @@ fn mem_db() {
                 let value = command.get(value_delimeter + 1..).unwrap();
                 let id = command.get(14..value_delimeter).unwrap();
                 let cmd = format!("UPDATE settings SET value={} WHERE id={};", value, id);
-
                 db.execute(&cmd, []).expect("SetIntSetting() failed.");
                 response = Response::from_string("Okay");
                 //
@@ -887,6 +973,23 @@ fn mem_db() {
             } else if command.starts_with("ReloadSettings") == true {
                 ReloadSettings_(&db);
                 response = Response::from_string("Okay");
+                //
+            } else if command.starts_with("Count") == true {
+                let table_delimeter = command.rfind('=').unwrap();
+                let table = command.get(table_delimeter + 1..).unwrap();
+                let what = command.get(6..table_delimeter).unwrap();
+                let cmd = format!("SELECT COUNT( DISTINCT {}) FROM {};", what, table);
+                let mut stmt = db.prepare(&cmd).unwrap();
+                let answer = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
+                response = Response::from_string(format!("{}", answer));
+                //
+            } else if command.starts_with("GetFilePatterns") == true {
+                let idx = command.get(16..).unwrap();
+                let cmd = format!("SELECT pszName, pszSpec FROM file_pat WHERE idx={};", idx);
+                let mut stmt = db.prepare(&cmd).unwrap();
+                let pszName = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
+                let pszSpec = stmt.query_row([], |row| row.get(1) as Result<String>).expect("No results?");
+                response = Response::from_string(format!("{}&{}", pszName, pszSpec));
             }
 
             // Generate a new key for the next request
@@ -904,7 +1007,7 @@ fn mem_db() {
 fn GetIntSetting(id: i32) -> usize {
     unsafe {
         let cmd = format!("{}/GetIntSetting={}", HOST_URL.to_owned(), id);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetSetting() failed");
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetIntSetting() failed");
         answer.as_str().unwrap().parse::<usize>().unwrap()
     }
 }
@@ -921,7 +1024,7 @@ fn SetIntSetting(id: i32, value: isize) {
 fn ReloadSettings() {
     unsafe {
         let cmd = format!("{}/ReloadSettings", HOST_URL.to_owned());
-        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetSetting() failed");
+        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("ReloadSettings() failed");
     }
 }
 
@@ -929,10 +1032,18 @@ fn ReloadSettings() {
 fn ReloadSettings_(db: &Connection) {
     unsafe {
         let cmd = format!(
-            r#"DROP TABLE 'settings';
+            r#"DROP TABLE IF EXISTS 'settings';
             CREATE TABLE 'settings' (name,ID,value);
+            DROP TABLE IF EXISTS file_pat;
+            CREATE TABLE 'file_pat' 
+              (
+                idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
+                pszName TEXT,
+                pszSpec TEXT
+              );
             ATTACH DATABASE '{}' AS SETTINGS;
-            INSERT INTO main.settings SELECT * FROM settings.settings;
+              INSERT INTO main.settings SELECT * FROM settings.settings;
+              INSERT INTO file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM settings.load_filterspec;
             DETACH DATABASE SETTINGS;"#,
             path_to_settings_sqlite
         );
@@ -944,7 +1055,7 @@ fn ReloadSettings_(db: &Connection) {
 fn SaveSettings() {
     unsafe {
         let cmd = format!("{}/SaveSettings", HOST_URL.to_owned());
-        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetSetting() failed");
+        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("SaveSettings() failed");
     }
 }
 
@@ -953,7 +1064,7 @@ fn SaveSettings_(db: &Connection) {
     unsafe {
         let cmd = format!(
             r#"ATTACH DATABASE '{}' AS SETTINGS;
-            DELETE FROM settings.settings WHERE id IN (SELECT id FROM settings.settings);
+            DELETE FROM settings.settings WHERE id IN (SELECT id FROM main.settings);
             INSERT INTO settings.settings SELECT * FROM main.settings;
             DETACH DATABASE SETTINGS"#,
             path_to_settings_sqlite
@@ -970,6 +1081,26 @@ fn ApplySettings(hwnd: HWND) {
         SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_NX_STUDIO, IsDlgButtonChecked(hwnd,IDC_PREFS_NX_STUDIO).try_into().unwrap());
+        SetIntSetting(IDC_PREFS_NX_STUDIO, IsDlgButtonChecked(hwnd, IDC_PREFS_NX_STUDIO).try_into().unwrap());
+    }
+}
+
+/// Counts the number of <what>s in a <table> which resides in our in memory database
+fn Count(what: &str, table: &str) -> usize {
+    unsafe {
+        let cmd = format!("{}/Count={}={}", HOST_URL.to_owned(), what, table);
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("Count() failed");
+        answer.as_str().unwrap().parse::<usize>().unwrap()
+    }
+}
+
+fn GetFilePatterns(idx: usize, mut zName: &mut String, mut zSpec: &mut String) {
+    unsafe {
+        let cmd = format!("{}/GetFilePatterns={}", HOST_URL.to_owned(), idx);
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetFilePatterns() failed");
+        let answer = answer.as_str().unwrap();
+        let delimeter = answer.rfind('&').unwrap();
+        *zName = answer.get(..delimeter).unwrap().to_string();
+        *zSpec = answer.get(delimeter + 1..).unwrap().to_string();
     }
 }
