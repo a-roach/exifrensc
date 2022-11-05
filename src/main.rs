@@ -381,33 +381,116 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Skip\0").as_ptr())));
                 SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("~\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("No delimeter\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_ADD)), LPARAM(0));
+                let dlgIDC_PREFS_ON_CONFLICT_ADD: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD);
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("~\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("No delimeter\0").as_ptr())));
+                SendMessageA(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_ADD)), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("12345\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("1\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("02\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("003\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
+                let dlgIDC_PREFS_ON_CONFLICT_NUM: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM);
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("12345\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("1\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("02\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("003\0").as_ptr())));
+                SendMessageA(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("the date shot in the EXIF data\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
+                let dlgIDC_PREFS_DATE_SHOOT_PRIMARY: HWND = GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY);
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("the date shot in the EXIF data\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageA(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
 
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
                 SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
                 SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
 
                 /*
+                 * Setup up the file mask box, which is a listview
+                 */
+                let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
+
+                SendMessageW(
+                    dlgFileMask,
+                    LVM_SETEXTENDEDLISTVIEWSTYLE,
+                    WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
+                    LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
+                );
+
+                let mut lvC = LVCOLUMNA {
+                    mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
+                    fmt: LVCFMT_LEFT,
+                    cx: convert_x_to_client_coords(IDC_PREFS_FILE_MASK_R.width - 12) / 2,
+                    pszText: transmute(w!("Pattern description").as_ptr()),
+                    cchTextMax: 0,
+                    iSubItem: 0,
+                    iImage: 0,
+                    iOrder: 0,
+                    cxMin: 50,
+                    cxDefault: 55,
+                    cxIdeal: 55,
+                };
+
+                SendMessageW(dlgFileMask, LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
+
+                lvC.iSubItem = 1;
+                lvC.pszText = transmute(w!("File pattern/mask").as_ptr());
+                SendMessageW(dlgFileMask, LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
+
+                let mut fileNames: Vec<Vec<u16>> = Vec::new(); // File name pointers
+                let mut fileSpecs: Vec<Vec<u16>> = Vec::new(); // File Spec pointers
+
+                // Ask out database how many predefined file patterns there are
+                for i in 0..Count("idx", "file_pat") {
+                    if i > 15 {
+                        // We only accept 16 file masks (at this time), so we jump out if we hit that limit
+                        break;
+                    }
+
+                    let mut Name: String = String::new();
+                    let mut Spec: String = String::new();
+
+                    GetFilePatterns(i + 1, &mut Name, &mut Spec); // retrieve from the database the values
+
+                    // We need a null terminator on the string for windows
+                    Name.push('\0');
+                    Spec.push('\0');
+
+                    // Convert the UTF8 to UTF16 (for windows) and push into a vector to keep it alive for a while
+                    fileNames.push(utf8_to_utf16(&Name));
+                    fileSpecs.push(utf8_to_utf16(&Spec));
+
+                    let mut iColFmt: u32 = 0;
+                    let mut uColumns: i32 = 0;
+                    let mut lv = LVITEMW {
+                        mask: LVIF_TEXT,
+                        iItem: i.try_into().unwrap(),
+                        iSubItem: 0,
+                        state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        pszText: transmute(fileNames[i].as_ptr()),
+                        cchTextMax: 0,
+                        iImage: 0,
+                        lParam: LPARAM(0),
+                        iIndent: 0,
+                        iGroupId: windows::Win32::UI::Controls::LVITEMA_GROUP_ID(0),
+                        cColumns: 0,
+                        puColumns: transmute(&uColumns),
+                        piColFmt: transmute(&iColFmt),
+                        iGroup: 0,
+                    };
+
+                    SendMessageW(dlgFileMask, LVM_INSERTITEM, WPARAM(0), LPARAM(&lv as *const _ as isize));
+                    lv.pszText = transmute(fileSpecs[i].as_ptr());
+                    lv.iSubItem = 1;
+                    SendMessageW(dlgFileMask, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
+                }
+
+                /*
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
                  * If we can not then we will disable getting to choose to use it as an option.
                  */
-                #[allow(non_upper_case_globals)]
                 let mut NX_Studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
                 let NX_stu_DlgItem: HWND = GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO);
@@ -430,7 +513,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
                 match wParam as i32 {
-                    IDC_PREFS_CANCEL => {
+                    IDC_PREFS_CANCEL | 2 => {
                         EndDialog(hwnd, 0);
                     }
                     IDC_PREFS_APPLY => {
@@ -644,13 +727,14 @@ impl WindowsControlText {
 /// Convert a Rust utf8 string into a windows utf16 string
 ///
 /// Possibly redundant now we have the !w macro which seems to do much the same thing?
+/// Actually, not redundant - can still be used on content which isn't known at compile time,
+/// whereas w! and !s are macros executed at compile time so can't be used with dynamic content.
 fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
     utf8_in.encode_utf16().collect()
 }
 
 //fn LoadFile() -> Result<()> {
 fn LoadFile() {
-    println!("file open");
     unsafe {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
 
@@ -717,11 +801,12 @@ fn LoadFile() {
             file_pat[i].pszSpec = transmute(fileSpecs[i].as_ptr());
         }
 
-        file_dialog.SetFileTypes(&file_pat);
+        file_dialog.SetFileTypes(&file_pat).unwrap();
 
-/*         let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, KF_FLAG_DEFAULT.0.try_into().unwrap(), None).unwrap();
-        file_dialog.SetDefaultFolder(&defPath);
- */
+        /* Don't know why this does not work! 😪
+        let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, KF_FLAG_DEFAULT.0.try_into().unwrap(), None).unwrap();
+                file_dialog.SetDefaultFolder(&defPath);
+         */
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options).expect("SetOptions() failed in LoadFile()");
@@ -882,7 +967,6 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
 /// A large part of this is becaus sqlite, while seemingly okay with concurrent reads, most definately
 /// does not like concurrent writes.
 //
-// [Header { field: HeaderField("Host"), value: "127.0.0.1:7878" }]
 fn mem_db() {
     let server = Server::http(HOST).expect(&(format!("{}{}{}", "Setting up the internal HTTP server (", HOST, ") failed.😫")));
     let mut host: String = String::new();
@@ -910,16 +994,18 @@ fn mem_db() {
         // Create the table which will hold all of the file names
         db.execute_batch(
             r#"DROP TABLE IF EXISTS files;
-        CREATE TABLE files (
-            idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
-            path TEXT NOT NULL, 
-            orig_file_name TEXT, 
-            new_file_name TEXT, 
-            locked BOOL DEFAULT 0, 
-            inNXstudio BOOL DEFAULT 0,
+               CREATE TABLE files (
+                    idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
+                    path TEXT NOT NULL, /* Path to image file */ 
+                    orig_file_name TEXT, 
+                    new_file_name TEXT,
+                    nksc_path TEXT, /* Path to the Nikon sidecar file */
+                    locked BOOL DEFAULT 0, 
+                    inNXstudio BOOL DEFAULT 0,
 
-            UNIQUE(path, orig_file_name)
-        );"#,
+                    UNIQUE(path, orig_file_name)
+               );
+            "#,
         )
         .expect("Setting up the file table failed.");
 
@@ -1094,7 +1180,8 @@ fn Count(what: &str, table: &str) -> usize {
     }
 }
 
-fn GetFilePatterns(idx: usize, mut zName: &mut String, mut zSpec: &mut String) {
+/// Function which gets file masks/patterns from ourin memory database
+fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
     unsafe {
         let cmd = format!("{}/GetFilePatterns={}", HOST_URL.to_owned(), idx);
         let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetFilePatterns() failed");
