@@ -21,7 +21,7 @@ use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
 use chrono::{prelude::Local, TimeZone};
 use minreq;
 use rand::prelude::*;
-use rusqlite::{ Connection, Result};
+use rusqlite::{Connection, Result};
 use tiny_http::{Response, Server};
 use urlencoding::decode;
 
@@ -55,7 +55,7 @@ macro_rules! Fail {
 
 macro_rules! FailU {
     ($a:expr) => {
-            MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
+        MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
     };
 }
 
@@ -71,10 +71,9 @@ pub const HOST_URL: &str = "http://127.0.0.1:18792";
 pub const NM_CLICK: u32 = 4294967195;
 pub const NM_DBLCLK: u32 = 4294967294;
 pub const NM_RCLICK: u32 = 4294967291;
-pub const NM_RDBLCLK: u32 =4294967290;
+pub const NM_RDBLCLK: u32 = 4294967290;
 
 pub const ID_CANCEL: i32 = 2; // This define just makes life easier, because IDCANCEL is defined in a really odd way
-
 
 /// Program's main entry point.
 ///
@@ -557,13 +556,12 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             ReloadSettings();
                             EndDialog(hwnd, 0);
                         }
-                    
                     }
 
                     IDM_PrefsFileMaskDel => {
                         let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
-                        let selected=SendMessageA(dlgFileMask,LVM_GETSELECTIONMARK,WPARAM(0),LPARAM(0));
-                        let mut name_buffer = [0; 64_usize];
+                        let selected = SendMessageA(dlgFileMask, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+                        let mut name_buffer = [0; 128_usize];
                         let lv = LVITEMW {
                             mask: LVIF_TEXT,
                             iItem: 0,
@@ -571,7 +569,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
                             stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
                             pszText: transmute(name_buffer.as_ptr()),
-                            cchTextMax: 64,
+                            cchTextMax: 128,
                             iImage: 0,
                             lParam: LPARAM(0),
                             iIndent: 0,
@@ -581,38 +579,69 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             piColFmt: std::ptr::null_mut(),
                             iGroup: 0,
                         };
-                        let charcount=SendMessageA(dlgFileMask,LVM_GETITEMTEXT,WPARAM(selected.0.try_into().unwrap()),LPARAM(&lv as *const _ as isize));
-                        let name = String::from_utf8_unchecked((&name_buffer).to_vec());
-                        }    
+                        let _charcount = SendMessageA(dlgFileMask, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+                        let mut utf7_buffer: [u8; 64] = [0; 64_usize];
+                        let mut i = 0;
+                        let mut j = 0;
+
+                        /*
+                         * Convert to ASCII/UTF7 (kind of)
+                         * We do this in a super dodgy way - just take every second character
+                         * and copy it into a new buffer, getting rid of the utf16 bit,
+                         * then we make a utf8 string out of it, and truncate it on the
+                         * first null character. We probably should check that every
+                         * second character is in fact a null, but in this context I am
+                         * confident that they are.
+                         *
+                         */
+                        while name_buffer[i] != 0 {
+                            utf7_buffer[j] = name_buffer[i];
+                            i += 2;
+                            j += 1;
+                        }
+                        let mut name = String::from_utf8_unchecked((&utf7_buffer).to_vec());
+                        name.truncate(name.find('\0').unwrap());
+
+                        if name == "All files" {
+                            let _x_ = MessageBoxA(None, s!("Sorry, but that one has to stay."), s!("Delete File Pattern"), MB_OK | MB_ICONEXCLAMATION);
+                        } else {
+                            if MessageBoxA(None, s!("Are you sure you want to delete this?"), s!("Delete File Pattern"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
+                                DeleteFilePatterns(&mut name);
+                                SendMessageA(dlgFileMask, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
+                            }
+                        }
+                    }
 
                     IDM_PrefsFileMaskAdd => {
-                        CreateDialogParamA(hinst, PCSTR(IDD_ADD_FILE_MASK as *mut u8), HWND(0), Some(add_file_mask_dlg_proc), LPARAM(0));
-                        }    
+                        let selected = SendMessageA(GetDlgItem(hwnd, IDC_PREFS_FILE_MASK), LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+                        CreateDialogParamA(hinst, PCSTR(IDD_ADD_FILE_MASK as *mut u8), hwnd, Some(add_file_mask_dlg_proc), LPARAM(selected.0));
+                    }
                     _ => {}
                 }
                 0
             }
-/*             WM_CONTEXTMENU =>{
-                println!("WM_CONTEXTMENU");
-                0
-            }
- */
+            /*             WM_CONTEXTMENU =>{
+                           println!("WM_CONTEXTMENU");
+                           0
+                       }
+            */
             WM_NOTIFY => {
+                if (lParamTOnmhdr(transmute(lParam)).0 == IDC_PREFS_FILE_MASK) && (lParamTOnmhdr(transmute(lParam)).1 == NM_RCLICK) {
+                    // Setup our right-click context menu
 
-                if (lParamTOnmhdr(transmute(lParam)).0==IDC_PREFS_FILE_MASK) &&
-                (lParamTOnmhdr(transmute(lParam)).1==NM_RCLICK)
-                {
-                 let mut xy = POINT { x: 0, y: 0};
-                 // let mut myPopup: HMENU = CreatePopupMenu().unwrap();
-                 // InsertMenuA(myPopup, 0, MF_BYCOMMAND | MF_STRING | MF_ENABLED, 1, s!("Hello"));
-                 let rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_PrefsFileMask as *mut u16)).unwrap();
-                 let myPopup: HMENU = GetSubMenu(rootmenu, 0);
-                 GetCursorPos(&mut xy);
-                 TrackPopupMenu(myPopup, TPM_TOPALIGN | TPM_LEFTALIGN, xy.x, xy.y, 0, hwnd, None); 
+                    let mut xy = POINT { x: 0, y: 0 };
+                    // We will load the menu from the resource file, but the next two lines show how to do it inline
+                    // let mut myPopup: HMENU = CreatePopupMenu().unwrap();
+                    // InsertMenuA(myPopup, 0, MF_BYCOMMAND | MF_STRING | MF_ENABLED, 1, s!("Hello"));
+
+                    let rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_PrefsFileMask as *mut u16)).unwrap();
+                    let myPopup: HMENU = GetSubMenu(rootmenu, 0);
+                    GetCursorPos(&mut xy);
+                    TrackPopupMenu(myPopup, TPM_TOPALIGN | TPM_LEFTALIGN, xy.x, xy.y, 0, hwnd, None);
                 }
                 0
             }
-            
+
             WM_DESTROY => {
                 EndDialog(hwnd, 0);
                 0
@@ -622,11 +651,10 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
     }
 }
 
-/// Dialog callback for our about window
+/// Dialog callback for our add a new file mask dialog
 ///
-/// Mostly thhis is just changing fonts
-extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
-
+extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    static mut selected_: LPARAM = LPARAM(0);
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg {
@@ -637,6 +665,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
 
+                selected_ = lParam;
 
                 0
             }
@@ -645,7 +674,42 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                 let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
-                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
+                    EndDialog(hwnd, 0);
+                } else if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                    let settings_hwnd: HWND = GetParent(hwnd);
+                    let mut text: [u16; 256] = [0; 256];
+                    let len = GetWindowTextW(GetDlgItem(hwnd, IDC_AddPatDescription), &mut text);
+                    let patDescription = String::from_utf16_lossy(&text[..len as usize]);
+                    let len = GetWindowTextW(GetDlgItem(hwnd, IDC_AddFileMaskFileMask), &mut text);
+                    let fileMask = String::from_utf16_lossy(&text[..len as usize]);
+
+                    let dlgFileMask: HWND = GetDlgItem(settings_hwnd, IDC_PREFS_FILE_MASK);
+                    let iColFmt: u32 = 0;
+                    let uColumns: i32 = 0;
+                    let mut lv = LVITEMW {
+                        mask: LVIF_TEXT,
+                        iItem: selected_.0.try_into().unwrap(),
+                        iSubItem: 0,
+                        state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        pszText: transmute(utf8_to_utf16(&patDescription).as_ptr()),
+                        cchTextMax: 0,
+                        iImage: 0,
+                        lParam: LPARAM(0),
+                        iIndent: 0,
+                        iGroupId: windows::Win32::UI::Controls::LVITEMA_GROUP_ID(0),
+                        cColumns: 0,
+                        puColumns: transmute(&uColumns),
+                        piColFmt: transmute(&iColFmt),
+                        iGroup: 0,
+                    };
+
+                    SendMessageW(dlgFileMask, LVM_INSERTITEM, WPARAM(0), LPARAM(&lv as *const _ as isize));
+                    lv.pszText = transmute(utf8_to_utf16(&fileMask).as_ptr());
+                    lv.iSubItem = 1;
+                    SendMessageW(dlgFileMask, LVM_SETITEMTEXT, WPARAM(selected_.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+
                     EndDialog(hwnd, 0);
                 }
                 0
@@ -659,7 +723,6 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
         }
     }
 }
-
 
 /// Dialog callback for our about window
 ///
@@ -1188,6 +1251,12 @@ fn mem_db() {
                 let pszName = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
                 let pszSpec = stmt.query_row([], |row| row.get(1) as Result<String>).expect("No results?");
                 response = Response::from_string(format!("{}&{}", pszName, pszSpec));
+                //
+            } else if command.starts_with("DeleteFilePatterns") == true {
+                let pszName = command.get(19..).unwrap();
+                let cmd = format!("DELETE FROM file_pat WHERE pszName='{}';", pszName);
+                db.execute(&cmd, []).expect("DeleteFilePatterns() failed.");
+                response = Response::from_string("Okay");
             }
 
             // Generate a new key for the next request
@@ -1304,11 +1373,15 @@ fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
     }
 }
 
+/// Function wrapper which deletes file masks/patterns from our in memory database
+fn DeleteFilePatterns(zName: &mut String) {
+    unsafe {
+        let cmd = format!("{}/DeleteFilePatterns={}", HOST_URL.to_owned(), zName);
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("DeleteFilePatterns() failed");
+    }
+}
 
 /// Extract the dialog ID and message from the NMHDR structure returned in lParam
-fn lParamTOnmhdr (nmhdr : *const NMHDR ) -> (i32, u32)
-{
-   unsafe {
-   ((*nmhdr).idFrom.try_into().unwrap(),(*nmhdr).code)
-   }
+fn lParamTOnmhdr(nmhdr: *const NMHDR) -> (i32, u32) {
+    unsafe { ((*nmhdr).idFrom.try_into().unwrap(), (*nmhdr).code) }
 }
