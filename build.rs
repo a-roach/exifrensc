@@ -88,7 +88,7 @@ fn main() {
             let mut param_len=0;
 
             // Next bit skips over spaces, should be an easier way to do this but...
-            for param in row.trim()[8..].trim().split(" ") {
+            for param in row.trim()[8..].trim().split(' ') {
                 if start_of_value == 0 {
                     identifier = param;
                     param_len=param.len();
@@ -142,7 +142,7 @@ pub struct ControlStuff
         let suffix="_R"; // If we define suffix as "" then no suffixes are appended and all the constants retain the original #define name. Change it to something else and the extra rectangle information is included
 
         if !row.contains("IDCANCEL") && !row.contains("IDOK") && !row.contains("IDC_STATIC") {
-            for param in row.split(",") {
+            for param in row.split(',') {
                 if param.contains("PUSHBUTTON") || param.contains("LTEXT") || param.contains("CTEXT") || param.contains("RTEXT") || param.contains("GROUPBOX") {
                     contains_pushbutton = true;
                 } else if param.contains("EDITTEXT") || param.contains("COMBOBOX") {
@@ -163,7 +163,7 @@ pub struct ControlStuff
                                     define_string.push_str(suffix);
                                     define_string.push_str(": ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
-                                    if suffix == "" {defines.remove(param.trim());}
+                                    if suffix.is_empty() {defines.remove(param.trim());}
                                 }
                                 _ => println!("Errr… 🤨 {}", param.trim()),
                             }
@@ -206,7 +206,7 @@ pub struct ControlStuff
                                     define_string.push_str(suffix);
                                     define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
-                                    if suffix == "" {defines.remove(param.trim());}
+                                    if suffix.is_empty() {defines.remove(param.trim());}
                                 }
                                 _ => println!("Errr… 🤨 {}", param.trim()),
                             }
@@ -246,7 +246,7 @@ pub struct ControlStuff
                                 define_string.push_str(suffix);
                                 define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                 define_string.push_str(text);
-                                if suffix == "" {defines.remove(param.trim());}
+                                if suffix.is_empty() {defines.remove(param.trim());}
                             }
                             _ => println!("Errr… 🤨 {}", param.trim()),
                         },
@@ -282,13 +282,13 @@ pub struct ControlStuff
             }
         }
 
-        if define_string != "" && suffix !="" {
+        if !define_string.is_empty() && !suffix.is_empty() {
             out_body.push_str(&define_string);
             out_body.push_str("\n");
         };
     }
     
-    out_body.push_str("\n");
+    out_body.push('\n');
 
     /*
      * Walk through the left over defines and add them to the file

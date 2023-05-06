@@ -175,7 +175,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
-        match nMsg as u32 {
+        match nMsg {
             WM_INITDIALOG => {
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
@@ -360,7 +360,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 // Walk through the dropped "files" one by one, but they may not all be files, some may be directories 😛
                 {
                     DragQueryFileA(hDrop, i, Some(file_name_buffer.as_mut_slice()));
-                    let mut file_name = String::from_utf8_unchecked((&file_name_buffer).to_vec());
+                    let mut file_name = String::from_utf8_unchecked(file_name_buffer.to_vec());
                     file_name.truncate(file_name.find('\0').unwrap());
 
                     let test_Path = PathBuf::from(&file_name);
@@ -389,7 +389,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
-        match nMsg as u32 {
+        match nMsg {
             WM_INITDIALOG => {
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
@@ -400,33 +400,33 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 /*
                  * Set up our combo boxes
                  */
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Add\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("Skip\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(w!("Add\0").as_ptr() as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip\0").as_ptr() as isize));
                 SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
 
                 let dlgIDC_PREFS_ON_CONFLICT_ADD: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD);
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("_\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("-\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!(".\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("~\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("No delimeter\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("_\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("-\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!(".\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("~\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("No delimeter\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_ADD)), LPARAM(0));
 
                 let dlgIDC_PREFS_ON_CONFLICT_NUM: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM);
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("12345\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("1\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("02\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("003\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("12345\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("1\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("02\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("003\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
 
                 let dlgIDC_PREFS_DATE_SHOOT_PRIMARY: HWND = GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY);
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("the date shot in the EXIF data\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the date shot in the EXIF data\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"File Created\" date\0").as_ptr())));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(transmute(w!("use \"Last Modified\" date\0").as_ptr())));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
+                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
                 SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
 
                 /*
@@ -563,8 +563,8 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     IDM_PrefsFileMaskDel => {
                         let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
                         let selected=SendMessageA(dlgFileMask,LVM_GETSELECTIONMARK,WPARAM(0),LPARAM(0));
-                        let mut name_buffer = [0; 64 as usize];
-                        let mut lv = LVITEMW {
+                        let mut name_buffer = [0; 64_usize];
+                        let lv = LVITEMW {
                             mask: LVIF_TEXT,
                             iItem: 0,
                             iSubItem: 0,
@@ -582,7 +582,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             iGroup: 0,
                         };
                         let charcount=SendMessageA(dlgFileMask,LVM_GETITEMTEXT,WPARAM(selected.0.try_into().unwrap()),LPARAM(&lv as *const _ as isize));
-                        let mut name = String::from_utf8_unchecked((&name_buffer).to_vec());
+                        let name = String::from_utf8_unchecked((&name_buffer).to_vec());
                         }    
 
                     IDM_PrefsFileMaskAdd => {
@@ -605,8 +605,8 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                  let mut xy = POINT { x: 0, y: 0};
                  // let mut myPopup: HMENU = CreatePopupMenu().unwrap();
                  // InsertMenuA(myPopup, 0, MF_BYCOMMAND | MF_STRING | MF_ENABLED, 1, s!("Hello"));
-                 let mut rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_PrefsFileMask as *mut u16)).unwrap();
-                 let mut myPopup: HMENU = GetSubMenu(rootmenu, 0);
+                 let rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_PrefsFileMask as *mut u16)).unwrap();
+                 let myPopup: HMENU = GetSubMenu(rootmenu, 0);
                  GetCursorPos(&mut xy);
                  TrackPopupMenu(myPopup, TPM_TOPALIGN | TPM_LEFTALIGN, xy.x, xy.y, 0, hwnd, None); 
                 }
@@ -629,7 +629,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
-        match nMsg as u32 {
+        match nMsg {
             WM_INITDIALOG => {
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
@@ -672,7 +672,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
 
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
-        match nMsg as u32 {
+        match nMsg {
             WM_INITDIALOG => {
                 let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
                 SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
@@ -688,7 +688,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 let days = diff.num_days();
                 let minutes = (diff.num_seconds() - (days * 86400)) / 60;
                 let iso_8601 = now.format("%Y-%m-%d %H:%M").to_string();
-                let vers = format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes).to_string();
+                let vers = format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes);
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
                 segoe_bold_9.set_text(IDC_ABOUT_ST_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
@@ -920,7 +920,7 @@ fn LoadFile() {
                 file_dialog.SetDefaultFolder(&defPath);
          */
         let mut options = file_dialog.GetOptions().unwrap();
-        options.0 = options.0 | FOS_ALLOWMULTISELECT.0;
+        options.0 |= FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options).expect("SetOptions() failed in LoadFile()");
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
@@ -958,7 +958,7 @@ fn LoadFile() {
                     item_name_len += 1;
                 }
                 let tmp_file_name = from_raw_parts(file_name.0, item_name_len);
-                let mut file_name_s = String::from_utf16(tmp_file_name).unwrap();
+                let file_name_s = String::from_utf16(tmp_file_name).unwrap();
                 println!("{}", file_name_s);
                 CoTaskMemFree(Some(transmute(file_name.0))); // feel rather nervy about this - not sure this is trying to free the right thing
             }
@@ -994,7 +994,7 @@ fn LoadDirectory() {
             }
 
             let tmp_directory_name = from_raw_parts(directory_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
-            let mut directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
+            let directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
             println!("{}", directory_name_s);
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
