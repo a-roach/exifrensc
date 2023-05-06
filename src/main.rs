@@ -21,7 +21,7 @@ use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
 use chrono::{prelude::Local, TimeZone};
 use minreq;
 use rand::prelude::*;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{ Connection, Result};
 use tiny_http::{Response, Server};
 use urlencoding::decode;
 
@@ -37,11 +37,25 @@ macro_rules! Warning {
     };
 }
 
+macro_rules! sWarning {
+    ($a:expr) => {
+        unsafe {
+            MessageBoxA(None, s!($a), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
+        }
+    };
+}
+
 macro_rules! Fail {
     ($a:expr) => {
         unsafe {
             MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
         }
+    };
+}
+
+macro_rules! FailU {
+    ($a:expr) => {
+            MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
     };
 }
 
@@ -52,6 +66,15 @@ static mut BONAFIDE: String = String::new(); // Used for verifying that the inte
 static mut EXITERMINATE: bool = false; // used to signal when our web server has been potentially compromised
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
+
+// Some definitions seemingly missing, as of coding, from the windows crate
+pub const NM_CLICK: u32 = 4294967195;
+pub const NM_DBLCLK: u32 = 4294967294;
+pub const NM_RCLICK: u32 = 4294967291;
+pub const NM_RDBLCLK: u32 =4294967290;
+
+pub const ID_CANCEL: i32 = 2; // This define just makes life easier, because IDCANCEL is defined in a really odd way
+
 
 /// Program's main entry point.
 ///
@@ -118,7 +141,7 @@ fn main() -> Result<()> {
             ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite); // id: i32, section: &str, filename: &str
 
             if (!Path::new(&path_to_settings_sqlite).exists()) {
-                Fail!("Could not create the settings file.");
+                FailU!("Could not create the settings file.");
                 panic!("Still can not create the settings file");
             }
         }
@@ -363,7 +386,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 }
 
 /// Dialog callback for our settings window
-extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
+extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg as u32 {
@@ -461,8 +484,8 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                     fileNames.push(utf8_to_utf16(&Name));
                     fileSpecs.push(utf8_to_utf16(&Spec));
 
-                    let mut iColFmt: u32 = 0;
-                    let mut uColumns: i32 = 0;
+                    let iColFmt: u32 = 0;
+                    let uColumns: i32 = 0;
                     let mut lv = LVITEMW {
                         mask: LVIF_TEXT,
                         iItem: i.try_into().unwrap(),
@@ -513,7 +536,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
                 match wParam as i32 {
-                    IDC_PREFS_CANCEL | 2 => {
+                    IDC_PREFS_CANCEL | ID_CANCEL => {
                         EndDialog(hwnd, 0);
                     }
                     IDC_PREFS_APPLY => {
@@ -534,8 +557,96 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                             ReloadSettings();
                             EndDialog(hwnd, 0);
                         }
+                    
                     }
+
+                    IDM_PrefsFileMaskDel => {
+                        let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
+                        let selected=SendMessageA(dlgFileMask,LVM_GETSELECTIONMARK,WPARAM(0),LPARAM(0));
+                        let mut name_buffer = [0; 64 as usize];
+                        let mut lv = LVITEMW {
+                            mask: LVIF_TEXT,
+                            iItem: 0,
+                            iSubItem: 0,
+                            state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                            stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                            pszText: transmute(name_buffer.as_ptr()),
+                            cchTextMax: 64,
+                            iImage: 0,
+                            lParam: LPARAM(0),
+                            iIndent: 0,
+                            iGroupId: windows::Win32::UI::Controls::LVITEMA_GROUP_ID(0),
+                            cColumns: 0,
+                            puColumns: std::ptr::null_mut(),
+                            piColFmt: std::ptr::null_mut(),
+                            iGroup: 0,
+                        };
+                        let charcount=SendMessageA(dlgFileMask,LVM_GETITEMTEXT,WPARAM(selected.0.try_into().unwrap()),LPARAM(&lv as *const _ as isize));
+                        let mut name = String::from_utf8_unchecked((&name_buffer).to_vec());
+                        }    
+
+                    IDM_PrefsFileMaskAdd => {
+                        CreateDialogParamA(hinst, PCSTR(IDD_ADD_FILE_MASK as *mut u8), HWND(0), Some(add_file_mask_dlg_proc), LPARAM(0));
+                        }    
                     _ => {}
+                }
+                0
+            }
+/*             WM_CONTEXTMENU =>{
+                println!("WM_CONTEXTMENU");
+                0
+            }
+ */
+            WM_NOTIFY => {
+
+                if (lParamTOnmhdr(transmute(lParam)).0==IDC_PREFS_FILE_MASK) &&
+                (lParamTOnmhdr(transmute(lParam)).1==NM_RCLICK)
+                {
+                 let mut xy = POINT { x: 0, y: 0};
+                 // let mut myPopup: HMENU = CreatePopupMenu().unwrap();
+                 // InsertMenuA(myPopup, 0, MF_BYCOMMAND | MF_STRING | MF_ENABLED, 1, s!("Hello"));
+                 let mut rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_PrefsFileMask as *mut u16)).unwrap();
+                 let mut myPopup: HMENU = GetSubMenu(rootmenu, 0);
+                 GetCursorPos(&mut xy);
+                 TrackPopupMenu(myPopup, TPM_TOPALIGN | TPM_LEFTALIGN, xy.x, xy.y, 0, hwnd, None); 
+                }
+                0
+            }
+            
+            WM_DESTROY => {
+                EndDialog(hwnd, 0);
+                0
+            }
+            _ => 0,
+        }
+    }
+}
+
+/// Dialog callback for our about window
+///
+/// Mostly thhis is just changing fonts
+extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
+
+    unsafe {
+        let hinst = GetModuleHandleA(None).unwrap();
+        match nMsg as u32 {
+            WM_INITDIALOG => {
+                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
+
+                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+
+
+                0
+            }
+
+            WM_COMMAND => {
+                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
+                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                    EndDialog(hwnd, 0);
                 }
                 0
             }
@@ -548,6 +659,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
         }
     }
 }
+
 
 /// Dialog callback for our about window
 ///
@@ -1029,7 +1141,7 @@ fn mem_db() {
 
             unsafe {
                 if bonafide != BONAFIDE || host != HOST {
-                    Fail!("A request to mem_db() came from an UNVERIFIED or UNKNOWN souruce.😲\r\rAborting!");
+                    FailU!("A request to mem_db() came from an UNVERIFIED or UNKNOWN souruce.😲\r\rAborting!");
                     EXITERMINATE = true;
                     panic!("mem_db() terminated after receiving a request from an unknown or foriegn source.😤");
                 }
@@ -1180,7 +1292,7 @@ fn Count(what: &str, table: &str) -> usize {
     }
 }
 
-/// Function which gets file masks/patterns from ourin memory database
+/// Function which gets file masks/patterns from our in memory database
 fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
     unsafe {
         let cmd = format!("{}/GetFilePatterns={}", HOST_URL.to_owned(), idx);
@@ -1190,4 +1302,13 @@ fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
         *zName = answer.get(..delimeter).unwrap().to_string();
         *zSpec = answer.get(delimeter + 1..).unwrap().to_string();
     }
+}
+
+
+/// Extract the dialog ID and message from the NMHDR structure returned in lParam
+fn lParamTOnmhdr (nmhdr : *const NMHDR ) -> (i32, u32)
+{
+   unsafe {
+   ((*nmhdr).idFrom.try_into().unwrap(),(*nmhdr).code)
+   }
 }

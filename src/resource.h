@@ -5,6 +5,8 @@
 #define IDD_MAIN                                100
 #define IDD_ABOUT                               101
 #define IDD_SETTINGS                            102
+#define IDR_PrefsFileMask                       104
+#define IDD_ADD_FILE_MASK                       106
 #define IDC_MAIN_ADD_FOLDER                     20004
 #define IDC_MAIN_ADD_PICTURE                    20008
 #define IDC_MAIN_DELETE                         20016
@@ -30,9 +32,13 @@
 #define IDC_ABOUT_BUILDDATE                     22002
 #define IDC_ABOUT_TITLE                         22004
 #define IDC_ABOUT_VERSION                       22006
+#define IDM_PrefsFileMaskAdd                    24000
+#define IDC_AddPatDescription                   24002
+#define IDC_AddFileMaskFileMask                 24003
 #define IDB_SETTINGS                            32158
 #define IDC_ABOUT_DESCRIPTION                   40000
 #define IDC_COPYRIGHT                           40001
+#define IDM_PrefsFileMaskDel                    40001
 #define IDC_ABOUT_ST_AUTHOR                     40002
 #define IDC_ABOUT_ST_COPY                       40003
 #define IDC_AUTHOR                              40004

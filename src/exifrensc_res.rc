@@ -16,6 +16,21 @@ IDB_SETTINGS       SQLITE         ".\\settings.sqlite"
 
 
 //
+// Menu resources
+//
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
+IDR_PrefsFileMask MENU
+{
+    POPUP "Root"
+    {
+        MENUITEM "Add", IDM_PrefsFileMaskAdd
+        MENUITEM "Delete", IDM_PrefsFileMaskDel
+    }
+}
+
+
+
+//
 // Dialog resources
 //
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
@@ -34,7 +49,23 @@ FONT 9, "Segoe UI"
     LTEXT           "xxx", IDC_ABOUT_BUILDDATE, 27, 76, 66, 9, SS_LEFT, WS_EX_LEFT
     CTEXT           "EXIFRENSC", IDC_ABOUT_TITLE, 7, 6, 103, 12, SS_CENTER, WS_EX_LEFT
     LTEXT           "Copyright:", IDC_ABOUT_ST_COPY, 7, 55, 33, 9, SS_LEFT, WS_EX_LEFT
-    LTEXT           "2022", IDC_COPYRIGHT, 45, 55, 15, 9, SS_LEFT, WS_EX_LEFT
+    LTEXT           "2022-2023", IDC_COPYRIGHT, 45, 55, 15, 9, SS_LEFT, WS_EX_LEFT
+}
+
+
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
+IDD_ADD_FILE_MASK DIALOG 0, 0, 280, 63
+STYLE DS_3DLOOK | DS_CENTER | DS_MODALFRAME | DS_SETFONT | WS_CAPTION | WS_VISIBLE | WS_POPUP | WS_SYSMENU
+CAPTION "Add File Mask"
+FONT 9, "Segoe UI"
+{
+    GROUPBOX        "Pattern description", IDC_STATIC, 7, 7, 130, 30, 0, WS_EX_LEFT
+    EDITTEXT        IDC_AddPatDescription, 13, 18, 119, 14, ES_AUTOHSCROLL, WS_EX_LEFT
+    GROUPBOX        "File pattern/mask", IDC_STATIC, 141, 7, 130, 30, 0, WS_EX_LEFT
+    EDITTEXT        IDC_AddFileMaskFileMask, 147, 18, 119, 14, ES_AUTOHSCROLL, WS_EX_LEFT
+    DEFPUSHBUTTON   "Add", IDOK, 7, 42, 50, 14, 0, WS_EX_LEFT
+    PUSHBUTTON      "Cancel", IDCANCEL, 221, 42, 50, 14, 0, WS_EX_LEFT
 }
 
 
@@ -93,7 +124,6 @@ FONT 9, "Segoe UI"
 //
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 IDI_PROG_ICON      ICON           ".\\Pantheon.ico"
-
 
 
 //

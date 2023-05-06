@@ -17,7 +17,7 @@ BEGIN
             VALUE "FileDescription", "Renames image files whilst updating sidecar files\0"
             VALUE "FileVersion", "$MAJORVERSION.$MINORVERSION\0"
             VALUE "InternalName", "exifrensc\0"
-            VALUE "LegalCopyright", "Copyright ©2022\0"
+            VALUE "LegalCopyright", "Copyright ©2022-2023\0"
             VALUE "OriginalFilename", "exifrensc.exe\0"
             VALUE "ProductName", "EXIF Rename including sidecar files\0"
             VALUE "ProductVersion", "$MAJORVERSION.$MINORVERSION\0"
