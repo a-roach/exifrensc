@@ -19,7 +19,6 @@ use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
 // use windows::Win32::UI::Shell::SHCreateItemInKnownFolder;
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
 use chrono::{prelude::Local, TimeZone};
-use minreq;
 use rand::prelude::*;
 use rusqlite::{Connection, Result};
 use tiny_http::{Response, Server};
@@ -466,6 +465,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 // Ask out database how many predefined file patterns there are
                 for i in 0..Count("idx", "file_pat") {
                     if i > 15 {
+                        let _x_ = MessageBoxA(None, s!("Sorry, but there is unfortunately a hard limit of 15 file patterns."), s!("Settings"), MB_OK | MB_ICONEXCLAMATION);
                         // We only accept 16 file masks (at this time), so we jump out if we hit that limit
                         break;
                     }
@@ -510,6 +510,13 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 }
 
                 /*
+                 * Copy the file pattern database into a temporary location so we can facilitate cancel/undo
+                 */
+
+                MakeTempFilePatternDatabase();
+                
+                
+                /*
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
                  * If we can not then we will disable getting to choose to use it as an option.
                  */
@@ -536,6 +543,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                 match wParam as i32 {
                     IDC_PREFS_CANCEL | ID_CANCEL => {
+                        RestoreFilePatternDatabase();
                         EndDialog(hwnd, 0);
                     }
                     IDC_PREFS_APPLY => {
@@ -585,7 +593,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                         let mut j = 0;
 
                         /*
-                         * Convert to ASCII/UTF7 (kind of)
+                         * Convert to ASCII/UTF7 (kind of 🙄)
                          * We do this in a super dodgy way - just take every second character
                          * and copy it into a new buffer, getting rid of the utf16 bit,
                          * then we make a utf8 string out of it, and truncate it on the
@@ -606,7 +614,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             let _x_ = MessageBoxA(None, s!("Sorry, but that one has to stay."), s!("Delete File Pattern"), MB_OK | MB_ICONEXCLAMATION);
                         } else {
                             if MessageBoxA(None, s!("Are you sure you want to delete this?"), s!("Delete File Pattern"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
-                                DeleteFilePatterns(&mut name);
+                                DeleteFilePattern(&mut name);
                                 SendMessageA(dlgFileMask, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
                             }
                         }
@@ -676,14 +684,20 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     EndDialog(hwnd, 0);
+                    //
                 } else if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
-                    let settings_hwnd: HWND = GetParent(hwnd);
+                    let settings_hwnd: HWND = GetParent(hwnd); // Have to find the settings window this sneaky way because we used lParam to pass the selected item
+                    
+                    // Get the text out of the two input boxes
                     let mut text: [u16; 256] = [0; 256];
                     let len = GetWindowTextW(GetDlgItem(hwnd, IDC_AddPatDescription), &mut text);
-                    let patDescription = String::from_utf16_lossy(&text[..len as usize]);
+                    let mut patDescription = String::from_utf16_lossy(&text[..len as usize]);
+                    patDescription.push('\0');
                     let len = GetWindowTextW(GetDlgItem(hwnd, IDC_AddFileMaskFileMask), &mut text);
-                    let fileMask = String::from_utf16_lossy(&text[..len as usize]);
+                    let mut fileMask = String::from_utf16_lossy(&text[..len as usize]);
+                    fileMask.push('\0');
 
+                    // Insert the new values into the listview in the settings window
                     let dlgFileMask: HWND = GetDlgItem(settings_hwnd, IDC_PREFS_FILE_MASK);
                     let iColFmt: u32 = 0;
                     let uColumns: i32 = 0;
@@ -709,6 +723,8 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                     lv.pszText = transmute(utf8_to_utf16(&fileMask).as_ptr());
                     lv.iSubItem = 1;
                     SendMessageW(dlgFileMask, LVM_SETITEMTEXT, WPARAM(selected_.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+
+                    AddFilePattern(selected_.0.try_into().unwrap(), patDescription, fileMask);
 
                     EndDialog(hwnd, 0);
                 }
@@ -823,7 +839,7 @@ impl WindowsControlText {
         unsafe {
             let hdc = GetDC(hwnd);
             self.hfont = CreateFontA(
-                (-1 * pitch * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
+                (-pitch * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
                 0,                                                  // logical average character width
                 0,                                                  // angle of escapement
                 0,                                                  // base-line orientation angle
@@ -954,6 +970,7 @@ fn LoadFile() {
         // ask out database how many predefined file patterns there are
         {
             if i > 15 {
+                let _x_ = MessageBoxA(None, s!("Sorry, but there is unfortunately a hard limit of 15 file patterns."), s!("Load File"), MB_OK | MB_ICONEXCLAMATION);
                 // We only accept 16 file masks (at this time), so we jump out if we hit that limit
                 break;
             }
@@ -1136,6 +1153,11 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
     }
 }
 
+/// Extract the dialog ID and message from the NMHDR structure returned in lParam
+fn lParamTOnmhdr(nmhdr: *const NMHDR) -> (i32, u32) {
+    unsafe { ((*nmhdr).idFrom.try_into().unwrap(), (*nmhdr).code) }
+}
+
 /// Our "web service" to handle internal database requests
 ///
 /// The server is a blocking server, so it only accepts a single request at a time.
@@ -1143,7 +1165,7 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
 /// does not like concurrent writes.
 //
 fn mem_db() {
-    let server = Server::http(HOST).expect(&(format!("{}{}{}", "Setting up the internal HTTP server (", HOST, ") failed.😫")));
+    let server = Server::http(HOST).unwrap_or_else(|_| panic!("{}{}{}", "Setting up the internal HTTP server (", HOST, ") failed.😫"));
     let mut host: String = String::new();
     let mut bonafide: String = String::new();
     let mut rng = rand::thread_rng();
@@ -1210,16 +1232,16 @@ fn mem_db() {
                 }
             }
 
-            let command = decode(request.url().trim_start_matches("/")).unwrap();
+            let command = decode(request.url().trim_start_matches('/')).unwrap();
             let mut response = Response::from_string("Not cool");
 
-            if command.starts_with("GetIntSetting") == true {
+            if command.starts_with("GetIntSetting") {
                 let cmd = format!("SELECT value FROM settings where ID={}", command.get(14..).expect("Extracting ID failed."));
                 let mut stmt = db.prepare(&cmd).unwrap();
                 let answer = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
                 response = Response::from_string(format!("{}", answer));
                 //
-            } else if command.starts_with("SetIntSetting") == true {
+            } else if command.starts_with("SetIntSetting") {
                 let value_delimeter = command.rfind('=').unwrap();
                 let value = command.get(value_delimeter + 1..).unwrap();
                 let id = command.get(14..value_delimeter).unwrap();
@@ -1227,15 +1249,15 @@ fn mem_db() {
                 db.execute(&cmd, []).expect("SetIntSetting() failed.");
                 response = Response::from_string("Okay");
                 //
-            } else if command.starts_with("SaveSettings") == true {
+            } else if command.starts_with("SaveSettings") {
                 SaveSettings_(&db);
                 response = Response::from_string("Okay");
                 //
-            } else if command.starts_with("ReloadSettings") == true {
+            } else if command.starts_with("ReloadSettings") {
                 ReloadSettings_(&db);
                 response = Response::from_string("Okay");
                 //
-            } else if command.starts_with("Count") == true {
+            } else if command.starts_with("Count") {
                 let table_delimeter = command.rfind('=').unwrap();
                 let table = command.get(table_delimeter + 1..).unwrap();
                 let what = command.get(6..table_delimeter).unwrap();
@@ -1244,7 +1266,7 @@ fn mem_db() {
                 let answer = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
                 response = Response::from_string(format!("{}", answer));
                 //
-            } else if command.starts_with("GetFilePatterns") == true {
+            } else if command.starts_with("GetFilePatterns") {
                 let idx = command.get(16..).unwrap();
                 let cmd = format!("SELECT pszName, pszSpec FROM file_pat WHERE idx={};", idx);
                 let mut stmt = db.prepare(&cmd).unwrap();
@@ -1252,11 +1274,55 @@ fn mem_db() {
                 let pszSpec = stmt.query_row([], |row| row.get(1) as Result<String>).expect("No results?");
                 response = Response::from_string(format!("{}&{}", pszName, pszSpec));
                 //
-            } else if command.starts_with("DeleteFilePatterns") == true {
-                let pszName = command.get(19..).unwrap();
+            } else if command.starts_with("DeleteFilePattern") {
+                let pszName = command.get(18..).unwrap();
                 let cmd = format!("DELETE FROM file_pat WHERE pszName='{}';", pszName);
-                db.execute(&cmd, []).expect("DeleteFilePatterns() failed.");
+                db.execute(&cmd, []).expect("DeleteFilePattern() failed.");
                 response = Response::from_string("Okay");
+                //
+            } else if command.starts_with("MakeTempFilePatternDatabase") {
+                let cmd = "DROP TABLE IF EXISTS tmp_file_pat; CREATE TABLE tmp_file_pat AS SELECT * FROM file_pat;".to_string();
+                db.execute_batch(&cmd).expect("MakeTempFilePatternDatabase() failed.");
+                response = Response::from_string("Okay");
+                //
+            }  else if command.starts_with("RestoreFilePatternDatabase") {
+                 let cmd = r#"DROP TABLE IF EXISTS file_pat;
+                                      CREATE TABLE 'file_pat' 
+                                      (
+                                          idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
+                                          pszName TEXT,
+                                          pszSpec TEXT
+                                      );
+                                      INSERT INTO file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM tmp_file_pat;
+                                      DROP TABLE IF EXISTS tmp_file_pat"#.to_string();
+                 db.execute_batch(&cmd).expect("RestoreFilePatternDatabase() failed.");
+                 response = Response::from_string("Okay");
+                 //
+            } else if command.starts_with("AddFilePattern") { 
+                let idx_delimeter = command.find('=').unwrap();
+                let zName_delimeter = command.rfind("|+|").unwrap();
+                let zSpec_delimeter = command.rfind("|$|").unwrap();
+                let idx = command.get(idx_delimeter + 1..zName_delimeter).unwrap();
+                let zName = command.get(zName_delimeter + 3..zSpec_delimeter - 1).unwrap();
+                let zSpec = command.get(zSpec_delimeter + 3..command.len()-1).unwrap();
+
+                let cmd = format!( r#"
+                DROP TABLE IF EXISTS add_file_pat;
+                CREATE TABLE add_file_pat 
+                (
+                    idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
+                    pszName TEXT,
+                    pszSpec TEXT
+                );
+                INSERT INTO add_file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM file_pat WHERE idx <={idx};
+                INSERT INTO add_file_pat (pszName, pszSpec) VALUES ('{zName}', '{zSpec}');
+                INSERT INTO add_file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM file_pat WHERE idx >{idx};
+                DROP TABLE IF EXISTS file_pat;
+                ALTER TABLE add_file_pat RENAME TO file_pat;
+                "#,idx=idx,zName=zName,zSpec=zSpec);
+                db.execute_batch(&cmd).expect("AddFilePattern() failed.");
+                response = Response::from_string("Okay");
+                //
             }
 
             // Generate a new key for the next request
@@ -1333,6 +1399,9 @@ fn SaveSettings_(db: &Connection) {
             r#"ATTACH DATABASE '{}' AS SETTINGS;
             DELETE FROM settings.settings WHERE id IN (SELECT id FROM main.settings);
             INSERT INTO settings.settings SELECT * FROM main.settings;
+            DROP TABLE settings.load_filterspec;
+            CREATE TABLE settings.load_filterspec (pszName TEXT, pszSpec TEXT);
+            INSERT INTO settings.load_filterspec SELECT pszName, pszSpec FROM main.file_pat ORDER BY idx;
             DETACH DATABASE SETTINGS"#,
             path_to_settings_sqlite
         );
@@ -1374,14 +1443,34 @@ fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
 }
 
 /// Function wrapper which deletes file masks/patterns from our in memory database
-fn DeleteFilePatterns(zName: &mut String) {
+fn DeleteFilePattern(zName: &mut String) {
     unsafe {
-        let cmd = format!("{}/DeleteFilePatterns={}", HOST_URL.to_owned(), zName);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("DeleteFilePatterns() failed");
+        let cmd = format!("{}/DeleteFilePattern={}", HOST_URL.to_owned(), zName);
+        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("DeleteFilePattern() failed");
     }
 }
 
-/// Extract the dialog ID and message from the NMHDR structure returned in lParam
-fn lParamTOnmhdr(nmhdr: *const NMHDR) -> (i32, u32) {
-    unsafe { ((*nmhdr).idFrom.try_into().unwrap(), (*nmhdr).code) }
+/// Function wrapper which makes a temporary copy of the file pattern table in out in memory database
+fn MakeTempFilePatternDatabase() {
+    unsafe {
+        let cmd = format!("{}/MakeTempFilePatternDatabase", HOST_URL.to_owned());
+        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("MakeTempFilePatternDatabase() failed");
+    }
+}
+
+/// Function wrapper which restores the default file patterns
+fn RestoreFilePatternDatabase() {
+    unsafe {
+        let cmd = format!("{}/RestoreFilePatternDatabase", HOST_URL.to_owned());
+        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("RestoreFilePatternDatabase() failed");
+    }
+}
+
+/// Function which gets file masks/patterns from our in memory database
+fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
+    unsafe {
+        let cmd = format!("{}/AddFilePattern={}|+|{}|$|{}", HOST_URL.to_owned(), idx,zName,zSpec);
+        println!("{}",cmd);
+        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("AddFilePatterns() failed");
+    }
 }

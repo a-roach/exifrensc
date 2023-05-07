@@ -199,10 +199,10 @@ pub struct ControlStuff
                         0 => {
                             // the identifier == #define ?
 
-                            match defines.get((&param.trim()[9..]).trim()) {
+                            match defines.get(param.trim()[9..].trim()) {
                                 Some(&text) => {
                                     define_string.push_str("pub const ");
-                                    define_string.push_str((&param.trim()[9..]).trim());
+                                    define_string.push_str(param.trim()[9..].trim());
                                     define_string.push_str(suffix);
                                     define_string.push_str(":ControlStuff = ControlStuff{ id: ");
                                     define_string.push_str(text);
