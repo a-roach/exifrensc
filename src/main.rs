@@ -429,8 +429,10 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                 /*
                  * Setup up the file mask box, which is a listview
+                 * Kind of in parrallel we will also set up the drag and drop filter box at the same time
                  */
                 let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
+                let dlgIDC_IDC_PREFS_DRAG_N_DROP: HWND = GetDlgItem(hwnd, IDC_PREFS_DRAG_N_DROP);
 
                 SendMessageW(
                     dlgFileMask,
@@ -479,6 +481,9 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     Name.push('\0');
                     Spec.push('\0');
 
+                    // Copy the wildcard pattern into our dropdown
+                    SendMessageW(dlgIDC_IDC_PREFS_DRAG_N_DROP, CB_ADDSTRING, WPARAM(0), LPARAM(utf8_to_utf16(&Spec).as_ptr() as isize));
+    
                     // Convert the UTF8 to UTF16 (for windows) and push into a vector to keep it alive for a while
                     fileNames.push(utf8_to_utf16(&Name));
                     fileSpecs.push(utf8_to_utf16(&Spec));
@@ -509,12 +514,13 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     SendMessageW(dlgFileMask, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
                 }
 
+                SendMessageA(dlgIDC_IDC_PREFS_DRAG_N_DROP, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DRAG_N_DROP)), LPARAM(0));
+
                 /*
                  * Copy the file pattern database into a temporary location so we can facilitate cancel/undo
                  */
 
                 MakeTempFilePatternDatabase();
-                
                 
                 /*
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
@@ -766,8 +772,10 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 let diff = now.signed_duration_since(annaversionary);
                 let days = diff.num_days();
                 let minutes = (diff.num_seconds() - (days * 86400)) / 60;
-                let iso_8601 = now.format("%Y-%m-%d %H:%M").to_string();
-                let vers = format!("{}.{}.{}.{}", majorversion, minorversion, days, minutes);
+                let iso_8601 = now.format("%Y-%m-%d %H:%M\0").to_string();
+                let vers = format!("{}.{}.{}.{}\0", majorversion, minorversion, days, minutes);
+                let copyright: String = now.format("2022-%Y\0").to_string();
+                println!("{}",copyright);
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
                 segoe_bold_9.set_text(IDC_ABOUT_ST_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
@@ -783,6 +791,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
 
                 SetDlgItemTextA(hwnd, IDC_ABOUT_VERSION, PCSTR(vers.as_ptr()));
                 SetDlgItemTextA(hwnd, IDC_ABOUT_BUILDDATE, PCSTR(iso_8601.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_COPYRIGHT, PCSTR(copyright.as_ptr()));
 
                 0
             }
@@ -1417,6 +1426,7 @@ fn ApplySettings(hwnd: HWND) {
         SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_DRAG_N_DROP, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DRAG_N_DROP), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_NX_STUDIO, IsDlgButtonChecked(hwnd, IDC_PREFS_NX_STUDIO).try_into().unwrap());
     }
 }

@@ -29,6 +29,7 @@
 #define IDC_PREFS_ON_CONFLICT_NUM               21026
 #define IDC_PREFS_RESET_SETTING                 21028
 #define IDC_PREFS_SAVE_SETTING                  21030
+#define IDC_PREFS_DRAG_N_DROP                   21032
 #define IDC_ABOUT_BUILDDATE                     22002
 #define IDC_ABOUT_TITLE                         22004
 #define IDC_ABOUT_VERSION                       22006
