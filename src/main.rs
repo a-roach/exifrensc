@@ -96,7 +96,7 @@ fn main() -> Result<()> {
 
     let mut test_studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
-    if test_studio.existant() == true {
+    if test_studio.existant() {
     } else {
         println!("No");
     }
@@ -146,7 +146,7 @@ fn main() -> Result<()> {
 
         InitCommonControls();
         if let Ok(hinst) = GetModuleHandleA(None) {
-            let main_hwnd = CreateDialogParamA(Some(hinst), PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
+            let main_hwnd = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
             let mut message = MSG::default();
 
             let db_thread = thread::spawn(move || {
@@ -158,7 +158,7 @@ fn main() -> Result<()> {
                     TranslateMessage(&message);
                     DispatchMessageA(&message);
                 }
-                if (EXITERMINATE == true) {
+                if EXITERMINATE {
                     SendMessageA(main_hwnd, WM_COMMAND, WPARAM(2), LPARAM(0)); // push the cancel button in our main dialog
                 }
             }
@@ -1144,13 +1144,13 @@ impl NxStudioDB {
 /// Rust's create file will, by default overwrite any existing files, which happens if the reset settings button is pressed.
 fn ResourceSave(id: i32, section: &str, filename: &str) {
     unsafe {
-        let the_asset: Result<_, _> = FindResourceA(HINSTANCE(0), PCSTR(id as *mut u8), PCSTR(section.as_ptr()));
+        let the_asset: Result<_, _> = FindResourceA(None, PCSTR(id as *mut u8), PCSTR(section.as_ptr()));
 
         match the_asset {
             Ok(ResourceHandle) => {
-                let GlobalMemoryBlock = LoadResource(HINSTANCE(0), ResourceHandle);
-                let ptMem = LockResource(GlobalMemoryBlock);
-                let dwSize: usize = SizeofResource(HINSTANCE(0), ResourceHandle).try_into().unwrap();
+                let GlobalMemoryBlock = LoadResource(None, ResourceHandle);
+                let ptMem = LockResource(GlobalMemoryBlock.unwrap());
+                let dwSize: usize = SizeofResource(None, ResourceHandle).try_into().unwrap();
                 let slice = slice::from_raw_parts(ptMem as *const u8, dwSize);
 
                 let mut output = File::create(filename).expect("Create file failed. 😮");

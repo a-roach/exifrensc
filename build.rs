@@ -151,7 +151,7 @@ pub struct ControlStuff
                     contains_control = true;
                 }
 
-                if contains_pushbutton == true {
+                if contains_pushbutton {
                     match idx {
                         1 => {
                             // the identifier == #define ?
@@ -194,7 +194,7 @@ pub struct ControlStuff
                         }
                         _ => (),
                     }
-                } else if contains_edittext == true {
+                } else if contains_edittext {
                     match idx {
                         0 => {
                             // the identifier == #define ?
@@ -237,7 +237,7 @@ pub struct ControlStuff
                         }
                         _ => (),
                     }
-                } else if contains_control == true {
+                } else if contains_control {
                     match idx {
                         1 => match defines.get(param.trim()) {
                             Some(&text) => {
@@ -284,7 +284,7 @@ pub struct ControlStuff
 
         if !define_string.is_empty() && !suffix.is_empty() {
             out_body.push_str(&define_string);
-            out_body.push_str("\n");
+            out_body.push('\n')
         };
     }
     
