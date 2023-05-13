@@ -3,7 +3,9 @@
 #![allow(non_upper_case_globals)]
 
 use core::mem::transmute;
+use std::collections::HashMap;
 use std::convert::TryInto;
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -363,7 +365,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                     let test_Path = PathBuf::from(&file_name);
                     if test_Path.is_dir() {
-                        //   AddFiles
+                        WalkDirectoryAndAddFiles(&test_Path);
                     } else {
                         // add file
                     }
@@ -483,7 +485,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                     // Copy the wildcard pattern into our dropdown
                     SendMessageW(dlgIDC_IDC_PREFS_DRAG_N_DROP, CB_ADDSTRING, WPARAM(0), LPARAM(utf8_to_utf16(&Spec).as_ptr() as isize));
-    
+
                     // Convert the UTF8 to UTF16 (for windows) and push into a vector to keep it alive for a while
                     fileNames.push(utf8_to_utf16(&Name));
                     fileSpecs.push(utf8_to_utf16(&Spec));
@@ -521,7 +523,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                  */
 
                 MakeTempFilePatternDatabase();
-                
+
                 /*
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
                  * If we can not then we will disable getting to choose to use it as an option.
@@ -530,15 +532,13 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                 let NX_stu_DlgItem: HWND = GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO);
 
-                if NX_Studio.existant() == false {
+                if !NX_Studio.existant() {
                     EnableWindow(NX_stu_DlgItem, false);
                     SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
+                } else if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 {
+                    SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_CHECKED.0.try_into().unwrap()), LPARAM(0));
                 } else {
-                    if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 {
-                        SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_CHECKED.0.try_into().unwrap()), LPARAM(0));
-                    } else {
-                        SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
-                    }
+                    SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
                 }
                 0
             }
@@ -613,16 +613,14 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             i += 2;
                             j += 1;
                         }
-                        let mut name = String::from_utf8_unchecked((&utf7_buffer).to_vec());
+                        let mut name = String::from_utf8_unchecked(utf7_buffer.to_vec());
                         name.truncate(name.find('\0').unwrap());
 
                         if name == "All files" {
                             let _x_ = MessageBoxA(None, s!("Sorry, but that one has to stay."), s!("Delete File Pattern"), MB_OK | MB_ICONEXCLAMATION);
-                        } else {
-                            if MessageBoxA(None, s!("Are you sure you want to delete this?"), s!("Delete File Pattern"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
-                                DeleteFilePattern(&mut name);
-                                SendMessageA(dlgFileMask, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
-                            }
+                        } else if MessageBoxA(None, s!("Are you sure you want to delete this?"), s!("Delete File Pattern"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
+                            DeleteFilePattern(&mut name);
+                            SendMessageA(dlgFileMask, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
                         }
                     }
 
@@ -693,7 +691,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                     //
                 } else if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
                     let settings_hwnd: HWND = GetParent(hwnd); // Have to find the settings window this sneaky way because we used lParam to pass the selected item
-                    
+
                     // Get the text out of the two input boxes
                     let mut text: [u16; 256] = [0; 256];
                     let len = GetWindowTextW(GetDlgItem(hwnd, IDC_AddPatDescription), &mut text);
@@ -775,7 +773,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 let iso_8601 = now.format("%Y-%m-%d %H:%M\0").to_string();
                 let vers = format!("{}.{}.{}.{}\0", majorversion, minorversion, days, minutes);
                 let copyright: String = now.format("2022-%Y\0").to_string();
-                println!("{}",copyright);
+                println!("{}", copyright);
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
                 segoe_bold_9.set_text(IDC_ABOUT_ST_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
@@ -835,6 +833,11 @@ fn convert_y_to_client_coords(height: i32) -> (i32) {
     (height * 1925 / 1000) // had been 1850, but 1925 produces slightly better results
 }
 
+/// Extract the dialog ID and message from the NMHDR structure returned in lParam
+fn lParamTOnmhdr(nmhdr: *const NMHDR) -> (i32, u32) {
+    unsafe { ((*nmhdr).idFrom.try_into().unwrap(), (*nmhdr).code) }
+}
+
 struct WindowsControlText {
     hwnd: HWND,
     hfont: HFONT,
@@ -849,19 +852,19 @@ impl WindowsControlText {
             let hdc = GetDC(hwnd);
             self.hfont = CreateFontA(
                 (-pitch * GetDeviceCaps(hdc, LOGPIXELSY)) / 72, // logical height of font
-                0,                                                  // logical average character width
-                0,                                                  // angle of escapement
-                0,                                                  // base-line orientation angle
-                weight.try_into().unwrap(),                         // font weight
-                italic as u32,                                      // italic attribute flag
-                0,                                                  // underline attribute flag
-                0,                                                  // strikeout attribute flag
-                ANSI_CHARSET.0.into(),                              // character set identifier
-                OUT_DEFAULT_PRECIS.0.into(),                        // output precision
-                CLIP_DEFAULT_PRECIS.0.into(),                       // clipping precision
-                PROOF_QUALITY.0.into(),                             // output quality
-                FF_DECORATIVE.0.into(),                             // pitch and family
-                face,                                               // pointer to typeface name string
+                0,                                              // logical average character width
+                0,                                              // angle of escapement
+                0,                                              // base-line orientation angle
+                weight.try_into().unwrap(),                     // font weight
+                italic as u32,                                  // italic attribute flag
+                0,                                              // underline attribute flag
+                0,                                              // strikeout attribute flag
+                ANSI_CHARSET.0.into(),                          // character set identifier
+                OUT_DEFAULT_PRECIS.0.into(),                    // output precision
+                CLIP_DEFAULT_PRECIS.0.into(),                   // clipping precision
+                PROOF_QUALITY.0.into(),                         // output quality
+                FF_DECORATIVE.0.into(),                         // pitch and family
+                face,                                           // pointer to typeface name string
             );
             self.hwnd = hwnd;
             ReleaseDC(hwnd, hdc);
@@ -924,6 +927,7 @@ impl WindowsControlText {
         }
     }
 }
+
 /// Convert a Rust utf8 string into a windows utf16 string
 ///
 /// Possibly redundant now we have the !w macro which seems to do much the same thing?
@@ -1093,6 +1097,88 @@ fn LoadDirectory() {
     //    Ok(())
 }
 
+/// Walks a directory looking for files and adding them to our in memory databse.
+/// Function makes two passes, the first time looking for the Nikon params directory, from which it will grab a copy internally
+/// so it can map out where the corrosponding entry is, then it looks for the files.
+fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
+    if WhichDirectory.is_dir()
+    // sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
+    {
+        let nksc_param_path = WhichDirectory.clone().join("NKSC_PARAM");
+        let mut nksc_param_paths = HashMap::new();
+        let mut nksc_path = String::new();
+        let mut nksc_name = String::new();
+
+        /*
+         * First look for the sidecar directory, nksc, then populate our HasMap with the key,
+         * which is just the equivalent .nef name, and the value is the path to the sidecar file.
+         */
+        if nksc_param_path.exists() && nksc_param_path.is_dir() {
+            let paths = fs::read_dir(nksc_param_path).expect("Could not scan the NIKON_PARAM directory 😥.");
+            for each_path in paths {
+                let file_path = each_path.unwrap();
+
+                if file_path.path().is_file() && file_path.path().extension() == Some(OsStr::new("nksc")) {
+                    nksc_path = format!("{}", file_path.path().display());
+                    let file_delimeter = nksc_path.rfind('\\').unwrap();
+                    let last_extension_delimeter = nksc_path.rfind('.').unwrap();
+                    nksc_name = nksc_path.trim()[file_delimeter + 1..last_extension_delimeter].to_string();
+
+                    nksc_param_paths.insert(nksc_name, nksc_path);
+                }
+            }
+        }
+
+        /*
+         * Now we will look for the files in the directory we just dropped, check to see if there is an associated
+         * sidecar file, then add them to our in memory database.
+         */
+        let paths = fs::read_dir(WhichDirectory).expect("Could not scan the directory 😥.");
+        for each_path in paths {
+            let file_path = each_path.unwrap();
+
+            if (file_path.path().is_file()) {
+                let this_file_path = format!("{}", file_path.path().display());
+                let file_delimeter = this_file_path.rfind('\\').unwrap();
+                let file_name = this_file_path.trim()[file_delimeter + 1..].to_string();
+
+                match nksc_param_paths.get_key_value(&file_name) {
+                    Some(file_path) => {
+                        let cmd = format!("INSERT OR IGNORE INTO files (path,orig_file_name,nksc_path,inNXstudio) VALUES('{}','{}','{}',1);", this_file_path, file_name, file_path.1);
+                        InmemoryAdHoc(cmd);
+                    }
+                    _ => {
+                        let cmd = format!("INSERT OR IGNORE INTO files (path,orig_file_name,inNXstudio) VALUES('{}','{}',0);", this_file_path, file_name);
+                        InmemoryAdHoc(cmd);
+                    }
+                }
+            } else {
+                /* Directory, at this stage no plans to add recursion, but this is where we would put it. For now,
+                 * we will just use it to potentially parse and/or find the nikon params directory
+                 */
+            }
+        }
+
+        /*
+         * Next we will execute a script to delete any unwanted files from the drag and drop
+         * GetFileSpec returns something like *.nef;*.jpg;*.jpeg, which we have to turn into
+         * something like '%.nef' OR '%.jpg' OR '%jpeg'
+         * so we can DELETE FROM files WHERE lower(orig_file_name) NOT LIKE '%.nef' OR '%.jpg' OR '%jpeg'
+         */
+        let mut spec: String = String::new();
+        GetFileSpec(IDC_PREFS_DRAG_N_DROP.try_into().unwrap(), &mut spec);
+        spec = spec.replace(";*", "') OR lower('%");
+        spec = spec.replace('*', "lower('%");
+        spec.push_str("')");
+
+        let cmd = format!("DELETE FROM files WHERE lower(orig_file_name) NOT LIKE {};", spec);
+        InmemoryAdHoc(cmd);
+        
+    } else {
+        println!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
+    }
+}
+
 /// Function to find out of there are any user settings for NX Studio
 ///
 /// Returns a PathBuff, which may be empty, so also check to see if it was successful or not
@@ -1162,15 +1248,10 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
     }
 }
 
-/// Extract the dialog ID and message from the NMHDR structure returned in lParam
-fn lParamTOnmhdr(nmhdr: *const NMHDR) -> (i32, u32) {
-    unsafe { ((*nmhdr).idFrom.try_into().unwrap(), (*nmhdr).code) }
-}
-
 /// Our "web service" to handle internal database requests
 ///
 /// The server is a blocking server, so it only accepts a single request at a time.
-/// A large part of this is becaus sqlite, while seemingly okay with concurrent reads, most definately
+/// A large part of this is because sqlite, while seemingly okay with concurrent reads, most definately
 /// does not like concurrent writes.
 //
 fn mem_db() {
@@ -1258,6 +1339,12 @@ fn mem_db() {
                 db.execute(&cmd, []).expect("SetIntSetting() failed.");
                 response = Response::from_string("Okay");
                 //
+            } else if command.starts_with("GetTextSetting") {
+                let cmd = format!("SELECT value FROM settings where ID={}", command.get(14..).expect("Extracting ID failed."));
+                let mut stmt = db.prepare(&cmd).unwrap();
+                let answer = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
+                response = Response::from_string(format!("{}", answer));
+                //
             } else if command.starts_with("SaveSettings") {
                 SaveSettings_(&db);
                 response = Response::from_string("Okay");
@@ -1294,8 +1381,8 @@ fn mem_db() {
                 db.execute_batch(&cmd).expect("MakeTempFilePatternDatabase() failed.");
                 response = Response::from_string("Okay");
                 //
-            }  else if command.starts_with("RestoreFilePatternDatabase") {
-                 let cmd = r#"DROP TABLE IF EXISTS file_pat;
+            } else if command.starts_with("RestoreFilePatternDatabase") {
+                let cmd = r#"DROP TABLE IF EXISTS file_pat;
                                       CREATE TABLE 'file_pat' 
                                       (
                                           idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
@@ -1303,19 +1390,21 @@ fn mem_db() {
                                           pszSpec TEXT
                                       );
                                       INSERT INTO file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM tmp_file_pat;
-                                      DROP TABLE IF EXISTS tmp_file_pat"#.to_string();
-                 db.execute_batch(&cmd).expect("RestoreFilePatternDatabase() failed.");
-                 response = Response::from_string("Okay");
-                 //
-            } else if command.starts_with("AddFilePattern") { 
+                                      DROP TABLE IF EXISTS tmp_file_pat"#
+                    .to_string();
+                db.execute_batch(&cmd).expect("RestoreFilePatternDatabase() failed.");
+                response = Response::from_string("Okay");
+                //
+            } else if command.starts_with("AddFilePattern") {
                 let idx_delimeter = command.find('=').unwrap();
                 let zName_delimeter = command.rfind("|+|").unwrap();
                 let zSpec_delimeter = command.rfind("|$|").unwrap();
                 let idx = command.get(idx_delimeter + 1..zName_delimeter).unwrap();
                 let zName = command.get(zName_delimeter + 3..zSpec_delimeter - 1).unwrap();
-                let zSpec = command.get(zSpec_delimeter + 3..command.len()-1).unwrap();
+                let zSpec = command.get(zSpec_delimeter + 3..command.len() - 1).unwrap();
 
-                let cmd = format!( r#"
+                let cmd = format!(
+                    r#"
                 DROP TABLE IF EXISTS add_file_pat;
                 CREATE TABLE add_file_pat 
                 (
@@ -1328,9 +1417,39 @@ fn mem_db() {
                 INSERT INTO add_file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM file_pat WHERE idx >{idx};
                 DROP TABLE IF EXISTS file_pat;
                 ALTER TABLE add_file_pat RENAME TO file_pat;
-                "#,idx=idx,zName=zName,zSpec=zSpec);
+                "#,
+                    idx = idx,
+                    zName = zName,
+                    zSpec = zSpec
+                );
                 db.execute_batch(&cmd).expect("AddFilePattern() failed.");
                 response = Response::from_string("Okay");
+                //
+            } else if command.starts_with("InmemoryAdHoc") {
+                let cmd_delimeter = command.find('=').unwrap();
+                let cmd = command.get(cmd_delimeter + 1..command.len() - 1).unwrap();
+                db.execute_batch(&cmd).expect("InmemoryAdHoc() failed.");
+                response = Response::from_string("Okay");
+                //
+            } else if command.starts_with("GetFileSpec") {
+                let idx = command.get(12..).unwrap();
+                let cmd = format!(
+                    r#"
+                                            SELECT pszSpec FROM file_pat 
+                                              WHERE
+                                               idx=(SELECT idx FROM file_pat,settings 
+                                                        WHERE 
+                                                          file_pat.idx=(settings.value + 1) 
+                                                          AND id={} 
+                                                          AND file_pat.idx
+                                                        );               
+                                        "#,
+                    idx
+                );
+
+                let mut stmt = db.prepare(&cmd).unwrap();
+                let pszSpec = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
+                response = Response::from_string(format!("{}", pszSpec));
                 //
             }
 
@@ -1359,6 +1478,15 @@ fn SetIntSetting(id: i32, value: isize) {
     unsafe {
         let cmd = format!("{}/SetIntSetting={}={}", HOST_URL.to_owned(), id, value);
         minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("SetIntSetting() failed");
+    }
+}
+
+/// Function to get a TEXT value from the settings database
+fn GetTextSetting(id: i32) -> usize {
+    unsafe {
+        let cmd = format!("{}/GetTextSetting={}", HOST_URL.to_owned(), id);
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetIntSetting() failed");
+        answer.as_str().unwrap().parse::<usize>().unwrap()
     }
 }
 
@@ -1452,6 +1580,16 @@ fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
     }
 }
 
+/// Function which gets file speccs from our in memory database
+fn GetFileSpec(idx: usize, zSpec: &mut String) {
+    unsafe {
+        let cmd = format!("{}/GetFileSpec={}", HOST_URL.to_owned(), idx);
+        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetFileSpec() failed");
+        let answer = answer.as_str().unwrap();
+        *zSpec = answer.to_string();
+    }
+}
+
 /// Function wrapper which deletes file masks/patterns from our in memory database
 fn DeleteFilePattern(zName: &mut String) {
     unsafe {
@@ -1479,8 +1617,17 @@ fn RestoreFilePatternDatabase() {
 /// Function which gets file masks/patterns from our in memory database
 fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
     unsafe {
-        let cmd = format!("{}/AddFilePattern={}|+|{}|$|{}", HOST_URL.to_owned(), idx,zName,zSpec);
-        println!("{}",cmd);
+        let cmd = format!("{}/AddFilePattern={}|+|{}|$|{}", HOST_URL.to_owned(), idx, zName, zSpec);
+        println!("{}", cmd);
         let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("AddFilePatterns() failed");
+    }
+}
+
+/// Function which gets file masks/patterns from our in memory database
+fn InmemoryAdHoc(sql: String) {
+    unsafe {
+        let cmd = format!("{}/InmemoryAdHoc={}", HOST_URL.to_owned(), sql);
+        println!("{}", cmd);
+        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("InmemoryAdHoc() failed");
     }
 }

@@ -13,15 +13,15 @@ My secondary objective was to learn how to use the win32 API from Rust. This has
 - Process WM_DROPFILES
 - Process CreateFontA
 - Add and process tool tips
+- Add functions to process ListViews (e.g. adding entries, deleting entries)
 - Write a parser in build.rs to process the resource file made by ResEdit and add constants Rust can digest
 - Create ListView
 - Worked on adding dialogs through IFileOpenDialog
-### To DO
-- Add functions to process ListViews (e.g. adding entries, deleting entries)
 - Add sqlite
+### To DO
 - Code renaming logic
 ## License
-Copyright © 2022 Andrew Roach. All rights reserved.
+Copyright © 2022-2023 Andrew Roach. All rights reserved.
 
 GNU General Public License version 3
 
