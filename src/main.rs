@@ -14,13 +14,20 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::{env, mem, slice, slice::from_raw_parts, str};
 use windows::core::*;
-use windows::Win32::System::Com::*;
-use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
-use windows::Win32::UI::{Controls::*, Input::KeyboardAndMouse::EnableWindow, Shell::*, WindowsAndMessaging::*};
-use windows::Win32::{Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*};
+use windows::Win32::UI::{
+    Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
+    Input::KeyboardAndMouse::EnableWindow,
+    Shell::{Common::COMDLG_FILTERSPEC, *},
+    WindowsAndMessaging::*,
+};
+use windows::Win32::{
+    Foundation::*,
+    Graphics::Gdi::*,
+    System::{Com::*, LibraryLoader::*},
+};
 // use windows::Win32::UI::Shell::SHCreateItemInKnownFolder;
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
-use chrono::{prelude::Local, TimeZone};
+use chrono::{prelude::Local, DateTime, TimeZone};
 use rand::prelude::*;
 use rusqlite::{Connection, Result};
 use tiny_http::{Response, Server};
@@ -62,8 +69,8 @@ macro_rules! FailU {
 
 // Global Variables
 static mut path_to_settings_sqlite: String = String::new();
+static mut main_hwnd: HWND = windows::Win32::Foundation::HWND(0);
 static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
-                                             //static dummy_mem_152:[u8;152]=[1; 152];
 static mut EXITERMINATE: bool = false; // used to signal when our web server has been potentially compromised
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
@@ -104,17 +111,17 @@ fn main() -> Result<()> {
     }
 
     /*
-     * Check to see if we have a directory set up in LOCALAPPDATA
-     * If we don't have it yet, then we will try to create it
+     * Check to see if we have a directory set up in LOCALAPPDATA.
+     * If we don't have it yet, then we will try to create it.
      */
 
-    let mut my_appdata: String = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+    let mut my_appdata: String = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set.");
     my_appdata.push_str("\\exifrensc");
     let test_if_we_have_our_app_data_directory_set_up = PathBuf::from(&my_appdata);
     if !test_if_we_have_our_app_data_directory_set_up.is_dir() {
         if let Err(_e) = fs::create_dir_all(test_if_we_have_our_app_data_directory_set_up) {
-            Fail!("Failed to create $LOCALAPPDATA\\exifrensc");
-            panic!("Failed to create $LOCALAPPDATA\\exifrensc");
+            Fail!("Failed to create \"$LOCALAPPDATA\\exifrensc\".");
+            panic!("Failed to create \"$LOCALAPPDATA\\exifrensc\".");
         }
 
         /*
@@ -122,14 +129,14 @@ fn main() -> Result<()> {
          */
 
         if !PathBuf::from(&my_appdata).is_dir() {
-            Fail!("Could not find and/or create $LOCALAPPDATA\\exifrensc");
-            panic!("Still can not find $LOCALAPPDATA");
+            Fail!("Could not find and/or create \"$LOCALAPPDATA\\exifrensc\".");
+            panic!("Still can not find $LOCALAPPDATA.");
         }
     }
 
     /*
      * Check to see if we already have a copy of the settings database.
-     * If not extract a copy from the resource stub.
+     * If not, extract a copy from the resource stub.
      *
      * On this occasion I am saving my settings in an sqlite database rather than the registry.
      * This is in part for "proof of concept", but also exposes the settings to any sql scripts which may need them.
@@ -148,7 +155,7 @@ fn main() -> Result<()> {
 
         InitCommonControls();
         if let Ok(hinst) = GetModuleHandleA(None) {
-            let main_hwnd = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
+            main_hwnd = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
             let mut message = MSG::default();
 
             let db_thread = thread::spawn(move || {
@@ -177,11 +184,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg {
             WM_INITDIALOG => {
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
-
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+                set_icon(hwnd);
 
                 segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 16, FW_NORMAL.0, false);
                 segoe_mdl2_assets.set_text(IDC_MAIN_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)"));
@@ -198,7 +201,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 /*
                  * If we wanted to set up a list box with files and directories, this is how we would do it.
-                 * Ive neer much liked the Win 3.11 look to this function so don't use it.
+                 * I've never much liked the Win 3.11 look to this function so don't use it.
                  *
 
                 let mut file_name_buffer = [0; MAX_PATH as usize];
@@ -215,8 +218,9 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                  * Setup up our listview
                  */
 
-                SendMessageW(
-                    GetDlgItem(hwnd, IDC_MAIN_FILE_LIST),
+                SendDlgItemMessageW(
+                    hwnd,
+                    IDC_MAIN_FILE_LIST,
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
                     WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
                     LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
@@ -236,17 +240,17 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     cxIdeal: 55,
                 };
 
-                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
+                SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
                 lvC.iSubItem = 1;
                 lvC.pszText = transmute(utf8_to_utf16("Changed File Name\0").as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
+                SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
 
                 lvC.pszText = transmute(utf8_to_utf16("File Created Time\0").as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
+                SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
 
                 lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
-                SendMessageW(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
+                SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
 
                 0
             }
@@ -273,8 +277,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             LoadFile();
                         }
                         IDC_MAIN_ERASE => {
-                            let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
-                            let s = o.as_str().unwrap();
+                            // let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
+                            // let s = o.as_str().unwrap();
                         }
                         IDC_MAIN_SYNC => {
                             LoadFile();
@@ -391,18 +395,14 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg {
             WM_INITDIALOG => {
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
-
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+                set_icon(hwnd);
 
                 /*
                  * Set up our combo boxes
                  */
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(w!("Add\0").as_ptr() as isize));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip\0").as_ptr() as isize));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Add\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip\0").as_ptr() as isize));
+                SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
 
                 let dlgIDC_PREFS_ON_CONFLICT_ADD: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD);
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("_\0").as_ptr() as isize));
@@ -425,9 +425,9 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
 
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
-                SendMessageW(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
-                SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
+                SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
 
                 /*
                  * Setup up the file mask box, which is a listview
@@ -496,14 +496,14 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                         mask: LVIF_TEXT,
                         iItem: i.try_into().unwrap(),
                         iSubItem: 0,
-                        state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
-                        stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
                         pszText: transmute(fileNames[i].as_ptr()),
                         cchTextMax: 0,
                         iImage: 0,
                         lParam: LPARAM(0),
                         iIndent: 0,
-                        iGroupId: windows::Win32::UI::Controls::LVITEMA_GROUP_ID(0),
+                        iGroupId: LVITEMA_GROUP_ID(0),
                         cColumns: 0,
                         puColumns: transmute(&uColumns),
                         piColFmt: transmute(&iColFmt),
@@ -545,7 +545,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
             WM_COMMAND => {
                 let mut wParam: u64 = transmute(wParam);
-                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+                wParam = (wParam << 48 >> 48); // LOWORD
 
                 match wParam as i32 {
                     IDC_PREFS_CANCEL | ID_CANCEL => {
@@ -580,14 +580,14 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                             mask: LVIF_TEXT,
                             iItem: 0,
                             iSubItem: 0,
-                            state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
-                            stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                            state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                            stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
                             pszText: transmute(name_buffer.as_ptr()),
                             cchTextMax: 128,
                             iImage: 0,
                             lParam: LPARAM(0),
                             iIndent: 0,
-                            iGroupId: windows::Win32::UI::Controls::LVITEMA_GROUP_ID(0),
+                            iGroupId: LVITEMA_GROUP_ID(0),
                             cColumns: 0,
                             puColumns: std::ptr::null_mut(),
                             piColFmt: std::ptr::null_mut(),
@@ -639,13 +639,17 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
             */
             WM_NOTIFY => {
                 if (lParamTOnmhdr(transmute(lParam)).0 == IDC_PREFS_FILE_MASK) && (lParamTOnmhdr(transmute(lParam)).1 == NM_RCLICK) {
-                    // Setup our right-click context menu
+                    /*
+                     * Setup our right-click context menu
+                     */
 
                     let mut xy = POINT { x: 0, y: 0 };
-                    // We will load the menu from the resource file, but the next two lines show how to do it inline
-                    // let mut myPopup: HMENU = CreatePopupMenu().unwrap();
-                    // InsertMenuA(myPopup, 0, MF_BYCOMMAND | MF_STRING | MF_ENABLED, 1, s!("Hello"));
 
+                    /*
+                     * We will load the menu from the resource file, but the next two lines show how to do it inline:
+                     * let mut myPopup: HMENU = CreatePopupMenu().unwrap();
+                     * InsertMenuA(myPopup, 0, MF_BYCOMMAND | MF_STRING | MF_ENABLED, 1, s!("Hello"));
+                     */
                     let rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_PrefsFileMask as *mut u16)).unwrap();
                     let myPopup: HMENU = GetSubMenu(rootmenu, 0);
                     GetCursorPos(&mut xy);
@@ -664,18 +668,13 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 }
 
 /// Dialog callback for our add a new file mask dialog
-///
+//
 extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     static mut selected_: LPARAM = LPARAM(0);
     unsafe {
-        let hinst = GetModuleHandleA(None).unwrap();
         match nMsg {
             WM_INITDIALOG => {
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
-
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+                set_icon(hwnd);
 
                 selected_ = lParam;
 
@@ -683,8 +682,8 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
             }
 
             WM_COMMAND => {
-                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
-                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+                let mut wParam: u64 = transmute(wParam);
+                wParam = (wParam << 48 >> 48);
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     EndDialog(hwnd, 0);
@@ -709,14 +708,14 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                         mask: LVIF_TEXT,
                         iItem: selected_.0.try_into().unwrap(),
                         iSubItem: 0,
-                        state: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
-                        stateMask: windows::Win32::UI::Controls::LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
                         pszText: transmute(utf8_to_utf16(&patDescription).as_ptr()),
                         cchTextMax: 0,
                         iImage: 0,
                         lParam: LPARAM(0),
                         iIndent: 0,
-                        iGroupId: windows::Win32::UI::Controls::LVITEMA_GROUP_ID(0),
+                        iGroupId: LVITEMA_GROUP_ID(0),
                         cColumns: 0,
                         puColumns: transmute(&uColumns),
                         piColFmt: transmute(&iColFmt),
@@ -746,7 +745,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
 /// Dialog callback for our about window
 ///
-/// Mostly thhis is just changing fonts
+/// Mostly this is just changing fonts
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
     // Have to be global because we need to destroy our font resources eventually
     static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
@@ -754,14 +753,9 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
     static mut segoe_italic_10: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
 
     unsafe {
-        let hinst = GetModuleHandleA(None).unwrap();
         match nMsg {
             WM_INITDIALOG => {
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
-
-                let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
-                SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
+                set_icon(hwnd);
 
                 let annaversionary = chrono::Local.ymd(2022, 6, 17).and_hms(0, 0, 0);
                 let majorversion = env!("CARGO_PKG_VERSION_MAJOR");
@@ -773,7 +767,6 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 let iso_8601 = now.format("%Y-%m-%d %H:%M\0").to_string();
                 let vers = format!("{}.{}.{}.{}\0", majorversion, minorversion, days, minutes);
                 let copyright: String = now.format("2022-%Y\0").to_string();
-                println!("{}", copyright);
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
                 segoe_bold_9.set_text(IDC_ABOUT_ST_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
@@ -795,8 +788,8 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
             }
 
             WM_COMMAND => {
-                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
-                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+                let mut wParam: u64 = transmute(wParam);
+                wParam = (wParam << 48 >> 48); // LOWORD
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
                     segoe_bold_9.destroy();
@@ -816,6 +809,18 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
             }
             _ => 0,
         }
+    }
+}
+
+/// Set our dialog/windows icon to the program's default
+fn set_icon(hwnd: HWND) {
+    unsafe {
+        let hinst = GetModuleHandleA(None).unwrap();
+        let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(icon.unwrap().0));
+
+        let icon = LoadIconW(hinst, PCWSTR(IDI_PROG_ICON as *mut u16));
+        SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_SMALL as usize), LPARAM(icon.unwrap().0));
     }
 }
 
@@ -906,10 +911,10 @@ impl WindowsControlText {
                     hwnd: self.hwnd,                                     // Handle to the hwnd that contains the tool
                     uId: transmute(GetDlgItem(self.hwnd, id)),           // hwnd handle to the tool. or parent_hwnd
                     rect: RECT { left: 0, top: 0, right: 0, bottom: 0 }, // bounding rectangle coordinates of the tool, don't use, but seems to need to supply to stop it grumbling
-                    hinst: hinst,                                        // Our hinstance
+                    hinst,                                               // Our hinstance
                     lpszText: transmute(tooltip_text.as_ptr()),          // Pointer to a utf16 buffer with the tooltip text
                     lParam: LPARAM(id.try_into().unwrap()),              // A 32-bit application-defined value that is associated with the tool
-                    lpReserved: 0 as *mut c_void,                        // Reserved. Must be set to NULL
+                    lpReserved: std::ptr::null_mut::<c_void>(),          // Reserved. Must be set to NULL
                 };
 
                 SendMessageA(tt_hwnd, TTM_ADDTOOL, WPARAM(0), LPARAM(&toolInfo as *const _ as isize));
@@ -931,7 +936,7 @@ impl WindowsControlText {
 /// Convert a Rust utf8 string into a windows utf16 string
 ///
 /// Possibly redundant now we have the !w macro which seems to do much the same thing?
-/// Actually, not redundant - can still be used on content which isn't known at compile time,
+/// Actually, not - can still be used on content which isn't known at compile time,
 /// whereas w! and !s are macros executed at compile time so can't be used with dynamic content.
 fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
     utf8_in.encode_utf16().collect()
@@ -953,7 +958,7 @@ fn LoadFile() {
          * our in memory database to give us the file name and its specs. These have to be
          * converted from ASCII to UTF16, and the UTF 16 is stored in a vevtor of u16.
          * But we need a vector of u16 vectors to keep the value from being destroyed long
-         * enought for the dialog to initialise.
+         * enough for the dialog to initialise.
          * You have no idea how long this actually took to figure out. Its kind of
          * embarassing even thought the solution was quite simple in the end.
          */
@@ -980,7 +985,7 @@ fn LoadFile() {
         let mut fileSpecs: Vec<Vec<u16>> = Vec::new(); // File Spec pointers
 
         for i in 0..Count("idx", "file_pat")
-        // ask out database how many predefined file patterns there are
+        // Ask our database how many predefined file patterns there are
         {
             if i > 15 {
                 let _x_ = MessageBoxA(None, s!("Sorry, but there is unfortunately a hard limit of 15 file patterns."), s!("Load File"), MB_OK | MB_ICONEXCLAMATION);
@@ -1037,7 +1042,7 @@ fn LoadFile() {
             CoTaskMemFree(transmute(file_name.0));
         } */
 
-        // Multi selection version
+        // Multi-selection version
         if let Ok(_dummy) = answer {
             let selected_files = file_dialog.GetResults().unwrap();
             let nSelected = selected_files.GetCount().unwrap();
@@ -1097,13 +1102,22 @@ fn LoadDirectory() {
     //    Ok(())
 }
 
-/// Walks a directory looking for files and adding them to our in memory databse.
+/// Walks a directory looking for files and adding them to our in memory databse
+///
 /// Function makes two passes, the first time looking for the Nikon params directory, from which it will grab a copy internally
 /// so it can map out where the corrosponding entry is, then it looks for the files.
 fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
     if WhichDirectory.is_dir()
     // sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
     {
+        /*
+         * We will just run a "protection" flag over any current files which are in our database
+         * to ensure they do not get deleted in the last step which is removing any files dropped
+         * into the database which are not images.
+         */
+
+        QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
+
         let nksc_param_path = WhichDirectory.clone().join("NKSC_PARAM");
         let mut nksc_param_paths = HashMap::new();
         let mut nksc_path = String::new();
@@ -1138,18 +1152,37 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let file_path = each_path.unwrap();
 
             if (file_path.path().is_file()) {
+                /*
+                 * Get the file created date and time, then format it as iso8601
+                 */
+                let metadata = fs::metadata(file_path.path()).unwrap();
+                let mut created_datetime = String::new();
+                if let Ok(created_time) = metadata.created() {
+                    created_datetime = SystemTimeToISO8601(&created_time);
+                }
+
+                /*
+                 * Get the file name from the path
+                 * I am sure there has to be an easier way, but this works so...
+                 */
                 let this_file_path = format!("{}", file_path.path().display());
                 let file_delimeter = this_file_path.rfind('\\').unwrap();
                 let file_name = this_file_path.trim()[file_delimeter + 1..].to_string();
 
+                /*
+                 * Insert into the database next
+                 */
                 match nksc_param_paths.get_key_value(&file_name) {
                     Some(file_path) => {
-                        let cmd = format!("INSERT OR IGNORE INTO files (path,orig_file_name,nksc_path,inNXstudio) VALUES('{}','{}','{}',1);", this_file_path, file_name, file_path.1);
-                        InmemoryAdHoc(cmd);
+                        let cmd = format!(
+                            "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
+                            this_file_path, created_datetime, file_name, file_path.1
+                        );
+                        QuickNonReturningSqlCommand(cmd);
                     }
                     _ => {
-                        let cmd = format!("INSERT OR IGNORE INTO files (path,orig_file_name,inNXstudio) VALUES('{}','{}',0);", this_file_path, file_name);
-                        InmemoryAdHoc(cmd);
+                        let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", this_file_path, created_datetime, file_name);
+                        QuickNonReturningSqlCommand(cmd);
                     }
                 }
             } else {
@@ -1171,12 +1204,25 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
         spec = spec.replace('*', "lower('%");
         spec.push_str("')");
 
-        let cmd = format!("DELETE FROM files WHERE lower(orig_file_name) NOT LIKE {};", spec);
-        InmemoryAdHoc(cmd);
-        
+        let cmd = format!(
+            r#"DELETE FROM files WHERE tmp_lock=0 AND lower(orig_file_name) NOT LIKE {};
+                                     UPDATE files SET tmp_lock=0;"#,
+            spec
+        );
+        QuickNonReturningSqlCommand(cmd);
     } else {
         println!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
     }
+}
+
+/// Convert SystemTime into ISO8601
+///
+/// Based on some code found at https://stackoverflow.com/questions/64146345/how-do-i-convert-a-systemtime-to-iso-8601-in-rust
+//
+// format!("{}", dt.format("%Y-%m-%d %H:%M:%S %f %Z"))
+fn SystemTimeToISO8601(st: &std::time::SystemTime) -> String {
+    let dt: DateTime<Local> = (*st).into();
+    format!("{}", dt.format("%+"))
 }
 
 /// Function to find out of there are any user settings for NX Studio
@@ -1184,7 +1230,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
 /// Returns a PathBuff, which may be empty, so also check to see if it was successful or not
 fn find_nx_studio_FileData_db() -> (PathBuf, bool) {
     let mut success = false;
-    let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+    let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set.");
     localappdata.push_str("\\Nikon\\NX Studio\\DB\\FileData.db");
     let test_Path = PathBuf::from(&localappdata);
 
@@ -1207,7 +1253,7 @@ impl NxStudioDB {
     /// Check to see if FileData.db exists, if it does, set its location and return true, if it doesn't return false
     fn existant(&mut self) -> (bool) {
         if self.location.as_os_str() == "" {
-            let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set");
+            let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set.");
             localappdata.push_str("\\Nikon\\NX Studio\\DB\\FileData.db");
 
             self.location = PathBuf::from(&localappdata);
@@ -1221,13 +1267,13 @@ impl NxStudioDB {
                 self.success = false;
             }
         }
-        return self.success;
+        self.success
     }
 }
 
 /// Function for saving a resource from the executable. Prints out an error message if not successful.
 ///
-/// Rust's create file will, by default overwrite any existing files, which happens if the reset settings button is pressed.
+/// Rust's create file will, by default overwrites any existing files, which happens if the reset settings button is pressed.
 fn ResourceSave(id: i32, section: &str, filename: &str) {
     unsafe {
         let the_asset: Result<_, _> = FindResourceA(None, PCSTR(id as *mut u8), PCSTR(section.as_ptr()));
@@ -1271,7 +1317,7 @@ fn mem_db() {
 
     /*
      * Next we will open up our in-memory sqlite database which will eventually be used for lots of things.
-     * After opening it we will attache the settings database to it and copy the settings across.
+     * After opening it we will attach the settings database to it and copy the settings across.
      */
     if let Ok(db) = Connection::open("c:/dev/in_memory.sqlite") {
         // Used for debugging
@@ -1283,12 +1329,14 @@ fn mem_db() {
             r#"DROP TABLE IF EXISTS files;
                CREATE TABLE files (
                     idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
-                    path TEXT NOT NULL, /* Path to image file */ 
+                    path TEXT NOT NULL, /* Full path to image file */
+                    created DATETIME, /* The time file file was created in seconds since Unix epoc */ 
                     orig_file_name TEXT, 
                     new_file_name TEXT,
                     nksc_path TEXT, /* Path to the Nikon sidecar file */
-                    locked BOOL DEFAULT 0, 
-                    inNXstudio BOOL DEFAULT 0,
+                    inNXstudio BOOL DEFAULT 0, /* has an entry in the NX Studio sqlite database */
+                    tmp_lock BOOL DEFAULT 0, /* Temporary lock for internal use */
+                    locked BOOL DEFAULT 0, /* Name change manually locked */
 
                     UNIQUE(path, orig_file_name)
                );
@@ -1322,9 +1370,15 @@ fn mem_db() {
                 }
             }
 
+            // Extract our command from the http request
             let command = decode(request.url().trim_start_matches('/')).unwrap();
             let mut response = Response::from_string("Not cool");
 
+            /*
+             *  Run our loop to process commands
+             *  These ideally should be kind of sorted from largest command string to smallest just
+             *  in case there is some overlap in the beginning of the strings.
+             */
             if command.starts_with("GetIntSetting") {
                 let cmd = format!("SELECT value FROM settings where ID={}", command.get(14..).expect("Extracting ID failed."));
                 let mut stmt = db.prepare(&cmd).unwrap();
@@ -1343,7 +1397,7 @@ fn mem_db() {
                 let cmd = format!("SELECT value FROM settings where ID={}", command.get(14..).expect("Extracting ID failed."));
                 let mut stmt = db.prepare(&cmd).unwrap();
                 let answer = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
-                response = Response::from_string(format!("{}", answer));
+                response = Response::from_string(answer.to_string());
                 //
             } else if command.starts_with("SaveSettings") {
                 SaveSettings_(&db);
@@ -1425,10 +1479,9 @@ fn mem_db() {
                 db.execute_batch(&cmd).expect("AddFilePattern() failed.");
                 response = Response::from_string("Okay");
                 //
-            } else if command.starts_with("InmemoryAdHoc") {
-                let cmd_delimeter = command.find('=').unwrap();
-                let cmd = command.get(cmd_delimeter + 1..command.len() - 1).unwrap();
-                db.execute_batch(&cmd).expect("InmemoryAdHoc() failed.");
+            } else if command.starts_with("QuickNonReturningSqlCommand") {
+                let cmd = command.get(28..command.len() - 1).unwrap();
+                db.execute_batch(cmd).expect("QuickNonReturningSqlCommand() failed.");
                 response = Response::from_string("Okay");
                 //
             } else if command.starts_with("GetFileSpec") {
@@ -1449,7 +1502,7 @@ fn mem_db() {
 
                 let mut stmt = db.prepare(&cmd).unwrap();
                 let pszSpec = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
-                response = Response::from_string(format!("{}", pszSpec));
+                response = Response::from_string(pszSpec.to_string());
                 //
             }
 
@@ -1464,38 +1517,36 @@ fn mem_db() {
     }
 }
 
-/// Function to get an integer value from the settings database
+/// Shorthand function to make the code a little more readable
+//
+// Twas a bit of a pain to write because both minreq and tinyhttp have the same "Response" name space and
+// it took a while to work out what was going wrong!
+fn send_cmd(cmd: &str, error_msg: &str) -> minreq::Response {
+    let cmd = format!("{}/{}", HOST_URL.to_owned(), cmd);
+    unsafe { minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect(error_msg) }
+}
+
+/// Get an integer value from the settings database
 fn GetIntSetting(id: i32) -> usize {
-    unsafe {
-        let cmd = format!("{}/GetIntSetting={}", HOST_URL.to_owned(), id);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetIntSetting() failed");
-        answer.as_str().unwrap().parse::<usize>().unwrap()
-    }
+    let cmd = format!("GetIntSetting={}", id);
+    send_cmd(&cmd, "GetIntSetting() failed").as_str().unwrap().parse::<usize>().unwrap()
 }
 
-/// Function to get an integer value from the settings database
+/// Set an integer value from the settings database
 fn SetIntSetting(id: i32, value: isize) {
-    unsafe {
-        let cmd = format!("{}/SetIntSetting={}={}", HOST_URL.to_owned(), id, value);
-        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("SetIntSetting() failed");
-    }
+    let cmd = format!("SetIntSetting={}={}", id, value);
+    send_cmd(&cmd, "SetIntSetting() failed");
 }
 
-/// Function to get a TEXT value from the settings database
+/// Get a TEXT value from the settings database
 fn GetTextSetting(id: i32) -> usize {
-    unsafe {
-        let cmd = format!("{}/GetTextSetting={}", HOST_URL.to_owned(), id);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetIntSetting() failed");
-        answer.as_str().unwrap().parse::<usize>().unwrap()
-    }
+    let cmd = format!("GetTextSetting={}", id);
+    send_cmd(&cmd, "GetTextSetting() failed").as_str().unwrap().parse::<usize>().unwrap()
 }
 
 /// Wrapper function to reload settings database from disc
 fn ReloadSettings() {
-    unsafe {
-        let cmd = format!("{}/ReloadSettings", HOST_URL.to_owned());
-        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("ReloadSettings() failed");
-    }
+    send_cmd("ReloadSettings", "ReloadSettings() failed");
 }
 
 /// Function to reload the settings database from disc
@@ -1521,12 +1572,9 @@ fn ReloadSettings_(db: &Connection) {
     }
 }
 
-/// Wrapper function to save the settings to disc
+/// Save the settings to disc
 fn SaveSettings() {
-    unsafe {
-        let cmd = format!("{}/SaveSettings", HOST_URL.to_owned());
-        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("SaveSettings() failed");
-    }
+    send_cmd("SaveSettings", "SaveSettings() failed");
 }
 
 /// Function to save the settings to disc
@@ -1537,8 +1585,8 @@ fn SaveSettings_(db: &Connection) {
             DELETE FROM settings.settings WHERE id IN (SELECT id FROM main.settings);
             INSERT INTO settings.settings SELECT * FROM main.settings;
             DROP TABLE settings.load_filterspec;
-            CREATE TABLE settings.load_filterspec (pszName TEXT, pszSpec TEXT);
-            INSERT INTO settings.load_filterspec SELECT pszName, pszSpec FROM main.file_pat ORDER BY idx;
+            CREATE TABLE settings.load_filterspec (idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, pszName TEXT, pszSpec TEXT);
+            INSERT INTO settings.load_filterspec (pszName, pszSpec) SELECT pszName, pszSpec FROM main.file_pat ORDER BY idx;
             DETACH DATABASE SETTINGS"#,
             path_to_settings_sqlite
         );
@@ -1561,73 +1609,52 @@ fn ApplySettings(hwnd: HWND) {
 
 /// Counts the number of <what>s in a <table> which resides in our in memory database
 fn Count(what: &str, table: &str) -> usize {
-    unsafe {
-        let cmd = format!("{}/Count={}={}", HOST_URL.to_owned(), what, table);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("Count() failed");
-        answer.as_str().unwrap().parse::<usize>().unwrap()
-    }
+    let cmd = format!("Count={}={}", what, table);
+    send_cmd(&cmd, "Count() failed").as_str().unwrap().parse::<usize>().unwrap()
 }
 
-/// Function which gets file masks/patterns from our in memory database
+/// Gets file masks/patterns from our in memory database
 fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
-    unsafe {
-        let cmd = format!("{}/GetFilePatterns={}", HOST_URL.to_owned(), idx);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetFilePatterns() failed");
-        let answer = answer.as_str().unwrap();
-        let delimeter = answer.rfind('&').unwrap();
-        *zName = answer.get(..delimeter).unwrap().to_string();
-        *zSpec = answer.get(delimeter + 1..).unwrap().to_string();
-    }
+    let cmd = format!("GetFilePatterns={}", idx);
+    let answer = send_cmd(&cmd, "GetFilePatterns() failed");
+    let answer = answer.as_str().unwrap();
+    let delimeter = answer.rfind('&').unwrap();
+    *zName = answer.get(..delimeter).unwrap().to_string();
+    *zSpec = answer.get(delimeter + 1..).unwrap().to_string();
 }
 
-/// Function which gets file speccs from our in memory database
+/// Gets file speccs from our in memory database
 fn GetFileSpec(idx: usize, zSpec: &mut String) {
-    unsafe {
-        let cmd = format!("{}/GetFileSpec={}", HOST_URL.to_owned(), idx);
-        let answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("GetFileSpec() failed");
-        let answer = answer.as_str().unwrap();
-        *zSpec = answer.to_string();
-    }
+    let cmd = format!("GetFileSpec={}", idx);
+    let answer = send_cmd(&cmd, "GetFileSpec() failed");
+    let answer = answer.as_str().unwrap();
+    *zSpec = answer.to_string();
 }
 
-/// Function wrapper which deletes file masks/patterns from our in memory database
+/// Deletes a file masks/patterns from our in memory database
 fn DeleteFilePattern(zName: &mut String) {
-    unsafe {
-        let cmd = format!("{}/DeleteFilePattern={}", HOST_URL.to_owned(), zName);
-        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("DeleteFilePattern() failed");
-    }
+    let cmd = format!("DeleteFilePattern={}", zName);
+    send_cmd(&cmd, "DeleteFilePattern() failed");
 }
 
-/// Function wrapper which makes a temporary copy of the file pattern table in out in memory database
+/// Makes a temporary copy of the file pattern table in our in-memory database
 fn MakeTempFilePatternDatabase() {
-    unsafe {
-        let cmd = format!("{}/MakeTempFilePatternDatabase", HOST_URL.to_owned());
-        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("MakeTempFilePatternDatabase() failed");
-    }
+    send_cmd("MakeTempFilePatternDatabase", "MakeTempFilePatternDatabase() failed");
 }
 
-/// Function wrapper which restores the default file patterns
+/// Restores the default file patterns
 fn RestoreFilePatternDatabase() {
-    unsafe {
-        let cmd = format!("{}/RestoreFilePatternDatabase", HOST_URL.to_owned());
-        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("RestoreFilePatternDatabase() failed");
-    }
+    send_cmd("RestoreFilePatternDatabase", "RestoreFilePatternDatabase() failed");
 }
 
-/// Function which gets file masks/patterns from our in memory database
+/// Gets file masks/patterns from our in memory database
 fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
-    unsafe {
-        let cmd = format!("{}/AddFilePattern={}|+|{}|$|{}", HOST_URL.to_owned(), idx, zName, zSpec);
-        println!("{}", cmd);
-        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("AddFilePatterns() failed");
-    }
+    let cmd = format!("AddFilePattern={}|+|{}|$|{}", idx, zName, zSpec);
+    send_cmd(&cmd, "AddFilePattern() failed");
 }
 
-/// Function which gets file masks/patterns from our in memory database
-fn InmemoryAdHoc(sql: String) {
-    unsafe {
-        let cmd = format!("{}/InmemoryAdHoc={}", HOST_URL.to_owned(), sql);
-        println!("{}", cmd);
-        let _answer = minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("InmemoryAdHoc() failed");
-    }
+/// Runs a non-returning batch sql script
+fn QuickNonReturningSqlCommand(sql: String) {
+    let cmd = format!("QuickNonReturningSqlCommand={}", sql);
+    send_cmd(&cmd, "QuickNonReturningSqlCommand() failed");
 }
