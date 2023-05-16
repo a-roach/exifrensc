@@ -5,7 +5,7 @@
 use core::mem::transmute;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::fs::File;
 use std::io::Write;
@@ -252,6 +252,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
                 SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
 
+                SendDlgItemMessageA(hwnd, IDC_MAIN_PATTERN, EM_SETLIMITTEXT, WPARAM(32), LPARAM(0));
+
                 0
             }
 
@@ -268,7 +270,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             LoadFile();
                         }
                         IDC_MAIN_ADD_FOLDER => {
-                            LoadFile();
+                            LoadDirectory();
                         }
                         IDC_MAIN_SAVE => {
                             LoadFile();
@@ -360,22 +362,30 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let hDrop: HDROP = HDROP(transmute(wParam));
                 let nFiles: u32 = DragQueryFileA(hDrop, 0xFFFFFFFF, Some(file_name_buffer.as_mut_slice())); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
 
+                /*
+                 * We will just run a "protection" flag over any current files which are in our database
+                 * to ensure they do not get deleted in the last step which is removing any files dropped
+                 * into the database which are not images.
+                 */
+
+                QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
+
                 for i in 0..nFiles
                 // Walk through the dropped "files" one by one, but they may not all be files, some may be directories 😛
                 {
                     DragQueryFileA(hDrop, i, Some(file_name_buffer.as_mut_slice()));
-                    let mut file_name = String::from_utf8_unchecked(file_name_buffer.to_vec());
-                    file_name.truncate(file_name.find('\0').unwrap());
+                    let mut file_path = String::from_utf8_unchecked(file_name_buffer.to_vec());
+                    file_path.truncate(file_path.find('\0').unwrap());
 
-                    let test_Path = PathBuf::from(&file_name);
+                    let test_Path = PathBuf::from(&file_path);
                     if test_Path.is_dir() {
                         WalkDirectoryAndAddFiles(&test_Path);
                     } else {
-                        // add file
+                        check_and_add_this_file_to_the_database(file_path);
                     }
-                    println!("{}", file_name);
                 }
 
+                delete_unwanted_files_after_bulk_import();
                 DragFinish(hDrop);
                 0
             }
@@ -675,7 +685,8 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
         match nMsg {
             WM_INITDIALOG => {
                 set_icon(hwnd);
-
+                SendDlgItemMessageA(hwnd, IDC_AddPatDescription, EM_SETLIMITTEXT, WPARAM(32), LPARAM(0));
+                SendDlgItemMessageA(hwnd, IDC_AddFileMaskFileMask, EM_SETLIMITTEXT, WPARAM(32), LPARAM(0));
                 selected_ = lParam;
 
                 0
@@ -683,7 +694,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
             WM_COMMAND => {
                 let mut wParam: u64 = transmute(wParam);
-                wParam = (wParam << 48 >> 48);
+                wParam = (wParam << 48 >> 48); // LOWORD
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
                     EndDialog(hwnd, 0);
@@ -692,7 +703,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                     let settings_hwnd: HWND = GetParent(hwnd); // Have to find the settings window this sneaky way because we used lParam to pass the selected item
 
                     // Get the text out of the two input boxes
-                    let mut text: [u16; 256] = [0; 256];
+                    let mut text: [u16; 64] = [0; 64];
                     let len = GetWindowTextW(GetDlgItem(hwnd, IDC_AddPatDescription), &mut text);
                     let mut patDescription = String::from_utf16_lossy(&text[..len as usize]);
                     patDescription.push('\0');
@@ -769,16 +780,16 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 let copyright: String = now.format("2022-%Y\0").to_string();
 
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
-                segoe_bold_9.set_text(IDC_ABOUT_ST_VER, w!(""), w!("")); // slightly (🤔exceedingly?) lazy way to set the font
-                segoe_bold_9.set_text(IDC_ABOUT_BUILT, w!(""), w!(""));
-                segoe_bold_9.set_text(IDC_ABOUT_ST_AUTHOR, w!(""), w!(""));
-                segoe_bold_9.set_text(IDC_ABOUT_ST_COPY, w!(""), w!(""));
+                segoe_bold_9.set_font(IDC_ABOUT_ST_VER);
+                segoe_bold_9.set_font(IDC_ABOUT_BUILT);
+                segoe_bold_9.set_font(IDC_ABOUT_ST_AUTHOR);
+                segoe_bold_9.set_font(IDC_ABOUT_ST_COPY);
 
                 segoe_bold_italic_13.register_font(hwnd, s!("Segoe UI"), 13, FW_BOLD.0, true);
-                segoe_bold_italic_13.set_text(IDC_ABOUT_TITLE, w!(""), w!(""));
+                segoe_bold_italic_13.set_font(IDC_ABOUT_TITLE);
 
                 segoe_italic_10.register_font(hwnd, s!("Segoe UI"), 10, FW_NORMAL.0, true);
-                segoe_italic_10.set_text(IDC_ABOUT_DESCRIPTION, w!(""), w!(""));
+                segoe_italic_10.set_font(IDC_ABOUT_DESCRIPTION);
 
                 SetDlgItemTextA(hwnd, IDC_ABOUT_VERSION, PCSTR(vers.as_ptr()));
                 SetDlgItemTextA(hwnd, IDC_ABOUT_BUILDDATE, PCSTR(iso_8601.as_ptr()));
@@ -923,6 +934,13 @@ impl WindowsControlText {
         }
     }
 
+    fn set_font(&self, id: i32) {
+        unsafe {
+            let hinst = GetModuleHandleA(None).unwrap();
+            SendDlgItemMessageA(self.hwnd, id, WM_SETFONT, WPARAM(self.hfont.0 as usize), LPARAM(0));
+        }
+    }
+
     /**
      *  Delete the font resource when we are done with it
      **/
@@ -1012,6 +1030,8 @@ fn LoadFile() {
         }
 
         file_dialog.SetFileTypes(&file_pat).unwrap();
+        let x: u32 = GetIntSetting(IDC_PREFS_DRAG_N_DROP).try_into().unwrap();
+        file_dialog.SetFileTypeIndex(x + 1).unwrap();
 
         /* Don't know why this does not work! 😪
         let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, KF_FLAG_DEFAULT.0.try_into().unwrap(), None).unwrap();
@@ -1023,7 +1043,9 @@ fn LoadFile() {
 
         let answer = file_dialog.Show(None); // Basically an error means no file was selected
 
-        /*  if let Ok(__dummy) = answer {
+        /*  Single file select version
+
+            if let Ok(__dummy) = answer {
             let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
             let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
             let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
@@ -1057,7 +1079,8 @@ fn LoadFile() {
                 }
                 let tmp_file_name = from_raw_parts(file_name.0, item_name_len);
                 let file_name_s = String::from_utf16(tmp_file_name).unwrap();
-                println!("{}", file_name_s);
+                check_and_add_this_file_to_the_database(file_name_s);
+
                 CoTaskMemFree(Some(transmute(file_name.0))); // feel rather nervy about this - not sure this is trying to free the right thing
             }
         }
@@ -1093,13 +1116,28 @@ fn LoadDirectory() {
 
             let tmp_directory_name = from_raw_parts(directory_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
             let directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
-            println!("{}", directory_name_s);
+            QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
+            WalkDirectoryAndAddFiles(&PathBuf::from(directory_name_s));
+            delete_unwanted_files_after_bulk_import();
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
 
         //file_dialog.Release();
     }
     //    Ok(())
+}
+
+/// Takes a file path, then sees if there is a Nikon sidecar file which matches it. If there is, returns the path
+/// to the sidecar file as a String, if not return a blank String.
+fn get_nksc_file_path(file_to_check: &PathBuf) -> String {
+    let nksc_param_path = file_to_check.parent().unwrap().to_path_buf().join("NKSC_PARAM").join(file_to_check.file_name().unwrap());
+    let nksc_path = format!("{}.nksc", nksc_param_path.as_path().display());
+    let nksc_path_to_test = Path::new(&nksc_path);
+    if nksc_path_to_test.is_file() {
+        nksc_path
+    } else {
+        "".to_string()
+    }
 }
 
 /// Walks a directory looking for files and adding them to our in memory databse
@@ -1110,14 +1148,6 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
     if WhichDirectory.is_dir()
     // sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
     {
-        /*
-         * We will just run a "protection" flag over any current files which are in our database
-         * to ensure they do not get deleted in the last step which is removing any files dropped
-         * into the database which are not images.
-         */
-
-        QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
-
         let nksc_param_path = WhichDirectory.clone().join("NKSC_PARAM");
         let mut nksc_param_paths = HashMap::new();
         let mut nksc_path = String::new();
@@ -1152,22 +1182,13 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let file_path = each_path.unwrap();
 
             if (file_path.path().is_file()) {
-                /*
-                 * Get the file created date and time, then format it as iso8601
-                 */
-                let metadata = fs::metadata(file_path.path()).unwrap();
-                let mut created_datetime = String::new();
-                if let Ok(created_time) = metadata.created() {
-                    created_datetime = SystemTimeToISO8601(&created_time);
-                }
+                let created_datetime = get_file_created_timestamp_as_iso8601(&file_path.path());
 
                 /*
-                 * Get the file name from the path
-                 * I am sure there has to be an easier way, but this works so...
+                 * Get the file name and path as a string from the PathBuf
                  */
-                let this_file_path = format!("{}", file_path.path().display());
-                let file_delimeter = this_file_path.rfind('\\').unwrap();
-                let file_name = this_file_path.trim()[file_delimeter + 1..].to_string();
+                let this_file_path = file_path.path().into_os_string().into_string().unwrap();
+                let file_name = file_path.path().file_name().unwrap().to_os_string().into_string().unwrap();
 
                 /*
                  * Insert into the database next
@@ -1191,38 +1212,62 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                  */
             }
         }
-
-        /*
-         * Next we will execute a script to delete any unwanted files from the drag and drop
-         * GetFileSpec returns something like *.nef;*.jpg;*.jpeg, which we have to turn into
-         * something like '%.nef' OR '%.jpg' OR '%jpeg'
-         * so we can DELETE FROM files WHERE lower(orig_file_name) NOT LIKE '%.nef' OR '%.jpg' OR '%jpeg'
-         */
-        let mut spec: String = String::new();
-        GetFileSpec(IDC_PREFS_DRAG_N_DROP.try_into().unwrap(), &mut spec);
-        spec = spec.replace(";*", "') OR lower('%");
-        spec = spec.replace('*', "lower('%");
-        spec.push_str("')");
-
-        let cmd = format!(
-            r#"DELETE FROM files WHERE tmp_lock=0 AND lower(orig_file_name) NOT LIKE {};
-                                     UPDATE files SET tmp_lock=0;"#,
-            spec
-        );
-        QuickNonReturningSqlCommand(cmd);
     } else {
         println!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
     }
 }
 
-/// Convert SystemTime into ISO8601
-///
-/// Based on some code found at https://stackoverflow.com/questions/64146345/how-do-i-convert-a-systemtime-to-iso-8601-in-rust
+/// Chcecks to see if there is a Nikon side car file, and then goes on to insert the details into the main database
+fn check_and_add_this_file_to_the_database(file_path: String) {
+    let test_Path = PathBuf::from(&file_path);
+    if test_Path.is_file() {
+        let nksc_path = get_nksc_file_path(&test_Path);
+        let created_datetime = get_file_created_timestamp_as_iso8601(&test_Path);
+        let orig_file_name = test_Path.file_name().unwrap().to_os_string().into_string().unwrap();
+
+        if !nksc_path.is_empty() {
+            let cmd = format!(
+                "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
+                file_path, created_datetime, orig_file_name, nksc_path
+            );
+            println!("{}", cmd);
+            QuickNonReturningSqlCommand(cmd);
+        } else {
+            let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", file_path, created_datetime, orig_file_name);
+            println!("{}", cmd);
+            QuickNonReturningSqlCommand(cmd);
+        }
+    }
+}
+
+/// Executes a script to delete any unwanted files from the drag and drop and then unsets the protection flag
 //
-// format!("{}", dt.format("%Y-%m-%d %H:%M:%S %f %Z"))
-fn SystemTimeToISO8601(st: &std::time::SystemTime) -> String {
-    let dt: DateTime<Local> = (*st).into();
-    format!("{}", dt.format("%+"))
+// GetFileSpec returns something like *.nef;*.jpg;*.jpeg, which we have to turn into
+// something like: DELETE FROM files WHERE lower(orig_file_name) NOT LIKE lower('%.nef') AND lower(orig_file_name) NOT LIKE lower('%.jpg') AND lower(orig_file_name) NOT LIKE lower('%jpeg')
+fn delete_unwanted_files_after_bulk_import() {
+    let mut spec: String = String::new();
+    GetFileSpec(IDC_PREFS_DRAG_N_DROP.try_into().unwrap(), &mut spec);
+    spec = spec.replace(";*", "') AND lower(orig_file_name) NOT LIKE lower('%");
+    spec = spec.replace('*', "lower('%");
+    spec.push_str("')");
+
+    let cmd = format!(
+        r#"DELETE FROM files WHERE tmp_lock=0 AND lower(orig_file_name) NOT LIKE {};
+                       UPDATE files SET tmp_lock=0;"#,
+        spec
+    );
+    QuickNonReturningSqlCommand(cmd);
+}
+
+/// Gets the file created time stamp from a given file in iso8601 format
+fn get_file_created_timestamp_as_iso8601(file_path: &PathBuf) -> String {
+    let metadata = fs::metadata(file_path.as_path()).unwrap();
+    if let Ok(created_time) = metadata.created() {
+        let timestamp: DateTime<Local> = (created_time).into();
+        format!("{}", timestamp.format("%+"))
+    } else {
+        "".to_string()
+    }
 }
 
 /// Function to find out of there are any user settings for NX Studio
@@ -1597,12 +1642,12 @@ fn SaveSettings_(db: &Connection) {
 /// Transfer settings from the dialog boxes in the preferences screen to the in memory settings database
 fn ApplySettings(hwnd: HWND) {
     unsafe {
-        SetIntSetting(IDC_PREFS_ON_CONFLICT, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_DRAG_N_DROP, SendMessageA(GetDlgItem(hwnd, IDC_PREFS_DRAG_N_DROP), CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_ON_CONFLICT, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT_ADD, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT_NUM, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_DRAG_N_DROP, SendDlgItemMessageA(hwnd, IDC_PREFS_DRAG_N_DROP, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_NX_STUDIO, IsDlgButtonChecked(hwnd, IDC_PREFS_NX_STUDIO).try_into().unwrap());
     }
 }
