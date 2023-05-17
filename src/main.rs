@@ -401,11 +401,19 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
 /// Dialog callback for our settings window
 extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
     unsafe {
         let hinst = GetModuleHandleA(None).unwrap();
         match nMsg {
             WM_INITDIALOG => {
                 set_icon(hwnd);
+
+                /*
+                 * Set up our action buttons
+                 */
+                segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 14, FW_NORMAL.0, false);
+                segoe_mdl2_assets.set_text(IDC_PREFSAddAMask, w!("\u{E710}"), w!("Add new file pattern"));
+                segoe_mdl2_assets.set_text(IDC_PREFSDelPattern, w!("\u{E74D}"), w!("Delete file pattern"));
 
                 /*
                  * Set up our combo boxes
@@ -560,15 +568,18 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 match wParam as i32 {
                     IDC_PREFS_CANCEL | ID_CANCEL => {
                         RestoreFilePatternDatabase();
+                        segoe_mdl2_assets.destroy();
                         EndDialog(hwnd, 0);
                     }
                     IDC_PREFS_APPLY => {
                         ApplySettings(hwnd);
+                        segoe_mdl2_assets.destroy();
                         EndDialog(hwnd, 0);
                     }
                     IDC_PREFS_SAVE_SETTING => {
                         ApplySettings(hwnd);
                         SaveSettings();
+                        segoe_mdl2_assets.destroy();
                         EndDialog(hwnd, 0);
                     }
                     IDC_PREFS_RESET_SETTING => {
@@ -578,63 +589,67 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                         if MessageBoxA(None, s!("Are you sure you want to reset the settings?"), s!("I want to know!"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
                             ResourceSave(IDB_SETTINGS, "SQLITE\0", &path_to_settings_sqlite);
                             ReloadSettings();
+                            segoe_mdl2_assets.destroy();
                             EndDialog(hwnd, 0);
                         }
                     }
 
-                    IDM_PrefsFileMaskDel => {
+                    IDM_PrefsFileMaskDel | IDC_PREFSDelPattern => {
                         let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
-                        let selected = SendMessageA(dlgFileMask, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
-                        let mut name_buffer = [0; 128_usize];
-                        let lv = LVITEMW {
-                            mask: LVIF_TEXT,
-                            iItem: 0,
-                            iSubItem: 0,
-                            state: LIST_VIEW_ITEM_STATE_FLAGS(0),
-                            stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
-                            pszText: transmute(name_buffer.as_ptr()),
-                            cchTextMax: 128,
-                            iImage: 0,
-                            lParam: LPARAM(0),
-                            iIndent: 0,
-                            iGroupId: LVITEMA_GROUP_ID(0),
-                            cColumns: 0,
-                            puColumns: std::ptr::null_mut(),
-                            piColFmt: std::ptr::null_mut(),
-                            iGroup: 0,
-                        };
-                        let _charcount = SendMessageA(dlgFileMask, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
-                        let mut utf7_buffer: [u8; 64] = [0; 64_usize];
-                        let mut i = 0;
-                        let mut j = 0;
+                        if SendMessageA(dlgFileMask, LVM_GETSELECTEDCOUNT, WPARAM(0), LPARAM(0)) != LRESULT(0) {
+                            let selected = SendMessageA(dlgFileMask, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+                            let mut name_buffer = [0; 128_usize];
+                            let lv = LVITEMW {
+                                mask: LVIF_TEXT,
+                                iItem: 0,
+                                iSubItem: 0,
+                                state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                                stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                                pszText: transmute(name_buffer.as_ptr()),
+                                cchTextMax: 128,
+                                iImage: 0,
+                                lParam: LPARAM(0),
+                                iIndent: 0,
+                                iGroupId: LVITEMA_GROUP_ID(0),
+                                cColumns: 0,
+                                puColumns: std::ptr::null_mut(),
+                                piColFmt: std::ptr::null_mut(),
+                                iGroup: 0,
+                            };
 
-                        /*
-                         * Convert to ASCII/UTF7 (kind of 🙄)
-                         * We do this in a super dodgy way - just take every second character
-                         * and copy it into a new buffer, getting rid of the utf16 bit,
-                         * then we make a utf8 string out of it, and truncate it on the
-                         * first null character. We probably should check that every
-                         * second character is in fact a null, but in this context I am
-                         * confident that they are.
-                         *
-                         */
-                        while name_buffer[i] != 0 {
-                            utf7_buffer[j] = name_buffer[i];
-                            i += 2;
-                            j += 1;
-                        }
-                        let mut name = String::from_utf8_unchecked(utf7_buffer.to_vec());
-                        name.truncate(name.find('\0').unwrap());
+                            SendMessageA(dlgFileMask, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
 
-                        if name == "All files" {
-                            let _x_ = MessageBoxA(None, s!("Sorry, but that one has to stay."), s!("Delete File Pattern"), MB_OK | MB_ICONEXCLAMATION);
-                        } else if MessageBoxA(None, s!("Are you sure you want to delete this?"), s!("Delete File Pattern"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
-                            DeleteFilePattern(&mut name);
-                            SendMessageA(dlgFileMask, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
+                            let mut utf7_buffer: [u8; 64] = [0; 64_usize];
+                            let mut i = 0;
+                            let mut j = 0;
+
+                            /*
+                             * Convert to ASCII/UTF7 (kind of 🙄)
+                             * We do this in a super dodgy way - just take every second character
+                             * and copy it into a new buffer, getting rid of the utf16 bit,
+                             * then we make a utf8 string out of it, and truncate it on the
+                             * first null character. We probably should check that every
+                             * second character is in fact a null, but in this context I am
+                             * confident that they are.
+                             *
+                             */
+                            while name_buffer[i] != 0 {
+                                utf7_buffer[j] = name_buffer[i];
+                                i += 2;
+                                j += 1;
+                            }
+                            let mut name = String::from_utf8_unchecked(utf7_buffer.to_vec());
+                            name.truncate(name.find('\0').unwrap());
+
+                            if name == "All files" {
+                                let _x_ = MessageBoxA(None, s!("Sorry, but that one has to stay."), s!("Delete File Pattern"), MB_OK | MB_ICONEXCLAMATION);
+                            } else if MessageBoxA(None, s!("Are you sure you want to delete this?"), s!("Delete File Pattern"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
+                                DeleteFilePattern(&mut name);
+                                SendMessageA(dlgFileMask, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
+                            }
                         }
                     }
-
-                    IDM_PrefsFileMaskAdd => {
+                    IDM_PrefsFileMaskAdd | IDC_PREFSAddAMask => {
                         let selected = SendMessageA(GetDlgItem(hwnd, IDC_PREFS_FILE_MASK), LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
                         CreateDialogParamA(hinst, PCSTR(IDD_ADD_FILE_MASK as *mut u8), hwnd, Some(add_file_mask_dlg_proc), LPARAM(selected.0));
                     }
