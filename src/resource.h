@@ -6,6 +6,7 @@
 #define IDD_ABOUT                               101
 #define IDD_SETTINGS                            102
 #define IDR_PrefsFileMask                       104
+#define IDD_THINKING                            105
 #define IDD_ADD_FILE_MASK                       106
 #define IDC_MAIN_ADD_FOLDER                     20004
 #define IDC_MAIN_ADD_PICTURE                    20008
@@ -32,12 +33,16 @@
 #define IDC_PREFS_DRAG_N_DROP                   21032
 #define IDC_PREFSAddAMask                       21040
 #define IDC_PREFSDelPattern                     21042
+#define IDC_PREFSExifToolBrowse                 21048
+#define IDC_PREFS_EXIF_Engine                   21050
+#define IDC_PREFS_ExifToolPath                  21052
 #define IDC_ABOUT_BUILDDATE                     22002
 #define IDC_ABOUT_TITLE                         22004
 #define IDC_ABOUT_VERSION                       22006
 #define IDM_PrefsFileMaskAdd                    24000
 #define IDC_AddPatDescription                   24002
 #define IDC_AddFileMaskFileMask                 24003
+#define IDC_PROGRESS                            25001
 #define IDB_SETTINGS                            32158
 #define IDC_ABOUT_DESCRIPTION                   40000
 #define IDC_COPYRIGHT                           40001

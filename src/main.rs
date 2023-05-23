@@ -6,13 +6,13 @@ use core::mem::transmute;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::{env, mem, slice, slice::from_raw_parts, str};
+use std::{fs, time};
 use windows::core::*;
 use windows::Win32::UI::{
     Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
@@ -23,11 +23,12 @@ use windows::Win32::UI::{
 use windows::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
-    System::{Com::*, LibraryLoader::*},
+    System::{Com::*, LibraryLoader::*, Threading::*},
 };
 // use windows::Win32::UI::Shell::SHCreateItemInKnownFolder;
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
 use chrono::{prelude::Local, DateTime, TimeZone};
+use exif::{In, Tag, Value};
 use rand::prelude::*;
 use rusqlite::{Connection, Result};
 use tiny_http::{Response, Server};
@@ -69,9 +70,9 @@ macro_rules! FailU {
 
 // Global Variables
 static mut path_to_settings_sqlite: String = String::new();
-static mut main_hwnd: HWND = windows::Win32::Foundation::HWND(0);
+static mut MAIN_HWND: HWND = windows::Win32::Foundation::HWND(0);
 static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
-static mut EXITERMINATE: bool = false; // used to signal when our web server has been potentially compromised
+static mut MAIN_THREAD_ID: u32 = 0; // The tread ID of our main process
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
 
@@ -93,6 +94,7 @@ pub const ID_CANCEL: i32 = 2; // This define just makes life easier, because IDC
 ///    * launch our window  
 fn main() -> Result<()> {
     println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
+    unsafe { MAIN_THREAD_ID = GetCurrentThreadId() };
     /*
         let path_to_FileData_db=find_nx_studio_FileData_db();
 
@@ -155,20 +157,17 @@ fn main() -> Result<()> {
 
         InitCommonControls();
         if let Ok(hinst) = GetModuleHandleA(None) {
-            main_hwnd = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
+            MAIN_HWND = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
             let mut message = MSG::default();
 
-            let db_thread = thread::spawn(move || {
+            let _db_thread = thread::spawn(|| {
                 mem_db();
             });
 
             while GetMessageA(&mut message, HWND(0), 0, 0).into() {
-                if (IsDialogMessageA(main_hwnd, &message) == false) {
+                if (IsDialogMessageA(MAIN_HWND, &message) == false) {
                     TranslateMessage(&message);
                     DispatchMessageA(&message);
-                }
-                if EXITERMINATE {
-                    SendMessageA(main_hwnd, WM_COMMAND, WPARAM(2), LPARAM(0)); // push the cancel button in our main dialog
                 }
             }
         }
@@ -188,7 +187,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 16, FW_NORMAL.0, false);
                 segoe_mdl2_assets.set_text(IDC_MAIN_ADD_PICTURE, w!("\u{EB9F}"), w!("Add photo(s)"));
-                segoe_mdl2_assets.set_text(IDC_MAIN_ADD_FOLDER, w!("\u{ED25}"), w!("Add a folder full of photos"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_ADD_FOLDER, w!("\u{F89A}"), w!("Add a folder full of photos"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_SAVE, w!("\u{E74E}"), w!("Save changes to names"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list"));
@@ -267,26 +266,27 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 } else {
                     match wParam as i32 {
                         IDC_MAIN_ADD_PICTURE => {
-                            LoadFile();
+                            LoadPictureFiles();
                         }
                         IDC_MAIN_ADD_FOLDER => {
-                            LoadDirectory();
+                            LoadDirectoryOfPictures();
                         }
                         IDC_MAIN_SAVE => {
-                            LoadFile();
+                            LoadPictureFiles();
                         }
                         IDC_MAIN_DELETE => {
-                            LoadFile();
+                            send_cmd("Quit", "Quit failed"); // Just for testing
                         }
                         IDC_MAIN_ERASE => {
-                            // let o = minreq::get(HOST_URL.to_owned() + "/aero?planejellyfor me").with_header("X-Bonafide", BONAFIDE.as_str()).send().expect("minreq send failed");
-                            // let s = o.as_str().unwrap();
+                            let _thinking_thread = thread::spawn(move || {
+                                thinking();
+                            });
                         }
                         IDC_MAIN_SYNC => {
-                            LoadFile();
+                            LoadPictureFiles();
                         }
                         IDC_MAIN_SETTINGS => {
-                            CreateDialogParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
+                            DialogBoxParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
                         }
 
                         IDC_MAIN_INFO => {
@@ -381,7 +381,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     if test_Path.is_dir() {
                         WalkDirectoryAndAddFiles(&test_Path);
                     } else {
-                        check_and_add_this_file_to_the_database(file_path);
+                        CheckAndAddThisFile(file_path);
                     }
                 }
 
@@ -412,8 +412,14 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                  * Set up our action buttons
                  */
                 segoe_mdl2_assets.register_font(hwnd, s!("Segoe MDL2 Assets"), 14, FW_NORMAL.0, false);
-                segoe_mdl2_assets.set_text(IDC_PREFSAddAMask, w!("\u{E710}"), w!("Add new file pattern"));
+                segoe_mdl2_assets.set_text(IDC_PREFSAddAMask, w!("\u{F8AA}"), w!("Add new file pattern"));
                 segoe_mdl2_assets.set_text(IDC_PREFSDelPattern, w!("\u{E74D}"), w!("Delete file pattern"));
+                segoe_mdl2_assets.set_text(IDC_PREFSExifToolBrowse, w!("\u{ED25}"), w!("Set path to ExifTool.exe"));
+
+                let mut ExifToolPath = GetTextSetting(IDC_PREFS_ExifToolPath);
+                ExifToolPath.push('\0');
+                let ExifToolPath = utf8_to_utf16(&ExifToolPath);
+                SetDlgItemTextW(hwnd, IDC_PREFS_ExifToolPath, PCWSTR(ExifToolPath.as_ptr()));
 
                 /*
                  * Set up our combo boxes
@@ -421,6 +427,15 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Add\0").as_ptr() as isize));
                 SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip\0").as_ptr() as isize));
                 SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
+
+                SendDlgItemMessageW(hwnd, IDC_PREFS_EXIF_Engine, CB_ADDSTRING, WPARAM(0), LPARAM(w!("ExifTool\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_EXIF_Engine, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Kamadak EXIF\0").as_ptr() as isize));
+                SendDlgItemMessageA(hwnd, IDC_PREFS_EXIF_Engine, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_EXIF_Engine)), LPARAM(0));
+                segoe_mdl2_assets.set_text(
+                    IDC_PREFS_EXIF_Engine,
+                    w!(""),
+                    w!("ExifTool requires an external program, is a little bit slower, but decodes tags more throughly.\rKamadak is internal, a bit faster, but not as comprehensive."),
+                );
 
                 let dlgIDC_PREFS_ON_CONFLICT_ADD: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD);
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("_\0").as_ptr() as isize));
@@ -651,7 +666,30 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     }
                     IDM_PrefsFileMaskAdd | IDC_PREFSAddAMask => {
                         let selected = SendMessageA(GetDlgItem(hwnd, IDC_PREFS_FILE_MASK), LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
-                        CreateDialogParamA(hinst, PCSTR(IDD_ADD_FILE_MASK as *mut u8), hwnd, Some(add_file_mask_dlg_proc), LPARAM(selected.0));
+                        DialogBoxParamA(hinst, PCSTR(IDD_ADD_FILE_MASK as *mut u8), hwnd, Some(add_file_mask_dlg_proc), LPARAM(selected.0));
+                    }
+                    IDC_PREFSExifToolBrowse => {
+                        let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
+
+                        // Change a few of the default options for the dialog
+                        file_dialog.SetTitle(w!("Path to ExifTool.exe")).expect("SetTitle() failed");
+                        file_dialog.SetOkButtonLabel(w!("Set")).expect("SetOkButtonLabel() failed");
+                        let mut file_pat: [COMDLG_FILTERSPEC; 1] = [COMDLG_FILTERSPEC {
+                            pszName: w!("ExifTool"),
+                            pszSpec: w!("ExifTool.exe"),
+                        }];
+                        file_dialog.SetFileTypes(&file_pat).unwrap();
+
+                        let answer = file_dialog.Show(None); // Basically an error means no file was selected
+
+                        if let Ok(__dummy) = answer {
+                            let selected_file = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
+                            let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
+                            let ExifToolPath = utf8_to_utf16(&file_name.to_string().unwrap());
+                            SetDlgItemTextW(hwnd, IDC_PREFS_ExifToolPath, PCWSTR(ExifToolPath.as_ptr()));
+                            SetTextSetting(IDC_PREFS_ExifToolPath, file_name.to_string().unwrap());
+                            CoTaskMemFree(Some(transmute(file_name.0)));
+                        }
                     }
                     _ => {}
                 }
@@ -850,6 +888,51 @@ fn set_icon(hwnd: HWND) {
     }
 }
 
+/// Progress bar to show we are doing something
+// CONTROL         "", IDC_PROGRESS, PROGRESS_CLASS, PBS_MARQUEE, 8, 14, 171, 11, WS_EX_LEFT
+fn thinking() {
+    unsafe {
+        let hinst = GetModuleHandleA(None).unwrap();
+        DialogBoxParamA(hinst, PCSTR(IDD_THINKING as *mut u8), HWND(0), Some(thinking_dlg_proc), LPARAM(0));
+    }
+}
+
+extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
+    unsafe {
+        match nMsg {
+            WM_INITDIALOG => {
+                set_icon(hwnd);
+                /*
+                               If we wanted to modify the style of the progress bar, we might do this:
+
+                               let current_style: u32 = GetWindowLongPtrA(GetDlgItem(hwnd, IDC_PROGRESS), GWL_STYLE).try_into().unwrap();
+                               SetWindowLongPtrA(GetDlgItem(hwnd, IDC_PROGRESS), GWL_STYLE, (current_style | PBS_MARQUEE).try_into().unwrap());
+                                 CONTROL         "", IDC_PROGRESS, PROGRESS_CLASS, PBS_MARQUEE, 8, 14, 171, 11, WS_EX_LEFT
+
+                */
+                SendDlgItemMessageA(hwnd, IDC_PROGRESS, PBM_SETMARQUEE, WPARAM(1), LPARAM(0));
+                1
+            }
+
+            WM_COMMAND => {
+                let mut wParam: u64 = transmute(wParam);
+                wParam = (wParam << 48 >> 48); // LOWORD
+
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                    EndDialog(hwnd, 0);
+                }
+                0
+            }
+
+            WM_DESTROY => {
+                EndDialog(hwnd, 0);
+                0
+            }
+            _ => 0,
+        }
+    }
+}
+
 /// Converts width to client width based on the Seogoe UI font's average size
 ///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
@@ -909,9 +992,9 @@ impl WindowsControlText {
         unsafe {
             let hinst = GetModuleHandleA(None).unwrap();
 
-            SendDlgItemMessageA(self.hwnd, id, WM_SETFONT, WPARAM(self.hfont.0 as usize), LPARAM(0));
-
             if caption != w!("") {
+                SendDlgItemMessageA(self.hwnd, id, WM_SETFONT, WPARAM(self.hfont.0 as usize), LPARAM(0));
+
                 SetDlgItemTextW(self.hwnd, id, caption);
             }
 
@@ -976,13 +1059,13 @@ fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
 }
 
 //fn LoadFile() -> Result<()> {
-fn LoadFile() {
+fn LoadPictureFiles() {
     unsafe {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
 
         // Change a few of the default options for the dialog
-        file_dialog.SetTitle(w!("Choose Photos to Rename")).expect("SetTitle() failed in LoadFile()");
-        file_dialog.SetOkButtonLabel(w!("Select Photos")).expect("SetOkButtonLabel() failed in LoadFile()");
+        file_dialog.SetTitle(w!("Choose Photos to Rename")).expect("SetTitle() failed in LoadPictureFiles()");
+        file_dialog.SetOkButtonLabel(w!("Select Photos")).expect("SetOkButtonLabel() failed in LoadPictureFiles()");
 
         /*
          * Next we are going to set up the file types combo box for the file selection dialog.
@@ -1087,14 +1170,7 @@ fn LoadFile() {
             for i in 0..nSelected {
                 let selected_file = selected_files.GetItemAt(i).unwrap();
                 let file_name = selected_file.GetDisplayName(SIGDN_FILESYSPATH).unwrap();
-                let tmp_slice = from_raw_parts(file_name.0, MAX_PATH as usize);
-                let mut item_name_len: usize = 0;
-                while tmp_slice[item_name_len] != 0 {
-                    item_name_len += 1;
-                }
-                let tmp_file_name = from_raw_parts(file_name.0, item_name_len);
-                let file_name_s = String::from_utf16(tmp_file_name).unwrap();
-                check_and_add_this_file_to_the_database(file_name_s);
+                CheckAndAddThisFile(file_name.to_string().unwrap());
 
                 CoTaskMemFree(Some(transmute(file_name.0))); // feel rather nervy about this - not sure this is trying to free the right thing
             }
@@ -1106,7 +1182,7 @@ fn LoadFile() {
 }
 
 //fn LoadDirectory() -> Result<()> {
-fn LoadDirectory() {
+fn LoadDirectoryOfPictures() {
     println!("Directory open");
     unsafe {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
@@ -1120,19 +1196,8 @@ fn LoadDirectory() {
         if let Ok(_v) = answer {
             let selected_directories = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
             let directory_name = selected_directories.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
-            let tmp_slice = from_raw_parts(directory_name.0, MAX_PATH as usize); // make the utf16 buffer look like a rust tmp_slice. This overruns, but that is okay.
-
-            // Figure out how big our file name is by walking the tmp_slice until we find the terminating null
-            // Really wish there was another way 😕
-            let mut item_name_len: usize = 0;
-            while tmp_slice[item_name_len] != 0 {
-                item_name_len += 1;
-            }
-
-            let tmp_directory_name = from_raw_parts(directory_name.0, item_name_len); // create another tmp_slice the size of the utf16 string
-            let directory_name_s = String::from_utf16(tmp_directory_name).unwrap(); // convert our utf16 buffer to a rust string
             QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
-            WalkDirectoryAndAddFiles(&PathBuf::from(directory_name_s));
+            WalkDirectoryAndAddFiles(&PathBuf::from(directory_name.to_string().unwrap()));
             delete_unwanted_files_after_bulk_import();
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
@@ -1232,13 +1297,23 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
     }
 }
 
-/// Chcecks to see if there is a Nikon side car file, and then goes on to insert the details into the main database
-fn check_and_add_this_file_to_the_database(file_path: String) {
+/// Checks to see if there is a Nikon side car file, and then goes on to insert the details into the main database
+fn CheckAndAddThisFile(file_path: String) {
     let test_Path = PathBuf::from(&file_path);
     if test_Path.is_file() {
         let nksc_path = get_nksc_file_path(&test_Path);
         let created_datetime = get_file_created_timestamp_as_iso8601(&test_Path);
         let orig_file_name = test_Path.file_name().unwrap().to_os_string().into_string().unwrap();
+
+        let file = std::fs::File::open(file_path.clone()).unwrap();
+        let mut bufreader = std::io::BufReader::new(&file);
+        let exifreader = exif::Reader::new();
+        let exif = exifreader.read_from_container(&mut bufreader).unwrap();
+        for f in exif.fields() {
+            if f.ifd_num == In::PRIMARY && f.tag.description().is_some() && f.tag.to_string() != "MakerNote" {
+                println!("{}, {}~~{}", f.tag.number(), f.tag, f.display_value().with_unit(&exif));
+            }
+        }
 
         if !nksc_path.is_empty() {
             let cmd = format!(
@@ -1386,20 +1461,27 @@ fn mem_db() {
         ReloadSettings_(&db);
         // Create the table which will hold all of the file names
         db.execute_batch(
-            r#"DROP TABLE IF EXISTS files;
+            r#"
+               DROP TABLE IF EXISTS files;
                CREATE TABLE files (
-                    idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
-                    path TEXT NOT NULL, /* Full path to image file */
+                    path TEXT NOT NULL UNIQUE, /* Full path to image file */
                     created DATETIME, /* The time file file was created in seconds since Unix epoc */ 
                     orig_file_name TEXT, 
                     new_file_name TEXT,
                     nksc_path TEXT, /* Path to the Nikon sidecar file */
                     inNXstudio BOOL DEFAULT 0, /* has an entry in the NX Studio sqlite database */
                     tmp_lock BOOL DEFAULT 0, /* Temporary lock for internal use */
-                    locked BOOL DEFAULT 0, /* Name change manually locked */
+                    locked BOOL DEFAULT 0 /* Name change manually locked */
+                );
 
-                    UNIQUE(path, orig_file_name)
-               );
+                DROP TABLE IF EXISTS exif;
+                CREATE TABLE exif (
+                    path TEXT NOT NULL, /* Full path to the original image file */
+                    tag TEXT NOT NULL, /* An exif TAG shorhand in text, as opposed to ID */
+                    value TEXT NOT NULL, /* The value of the exif tag */
+                
+                    UNIQUE(path,tag)
+                );
             "#,
         )
         .expect("Setting up the file table failed.");
@@ -1425,7 +1507,7 @@ fn mem_db() {
             unsafe {
                 if bonafide != BONAFIDE || host != HOST {
                     FailU!("A request to mem_db() came from an UNVERIFIED or UNKNOWN souruce.😲\r\rAborting!");
-                    EXITERMINATE = true;
+                    PostThreadMessageA(MAIN_THREAD_ID, WM_QUIT, WPARAM(1), LPARAM(0));
                     panic!("mem_db() terminated after receiving a request from an unknown or foriegn source.😤");
                 }
             }
@@ -1458,6 +1540,14 @@ fn mem_db() {
                 let mut stmt = db.prepare(&cmd).unwrap();
                 let answer = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
                 response = Response::from_string(answer.to_string());
+                //
+            } else if command.starts_with("SetTextSetting") {
+                let value_delimeter = command.rfind('=').unwrap();
+                let value = command.get(value_delimeter + 1..).unwrap();
+                let id = command.get(15..value_delimeter).unwrap();
+                let cmd = format!("UPDATE settings SET value='{}' WHERE id={};", value, id);
+                db.execute(&cmd, []).expect("SetTextSetting() failed.");
+                response = Response::from_string("Okay");
                 //
             } else if command.starts_with("SaveSettings") {
                 SaveSettings_(&db);
@@ -1564,6 +1654,13 @@ fn mem_db() {
                 let pszSpec = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
                 response = Response::from_string(pszSpec.to_string());
                 //
+            } else if command.starts_with("Quit") {
+                println!("Quit");
+                unsafe {
+                    PostThreadMessageA(MAIN_THREAD_ID, WM_QUIT, WPARAM(2), LPARAM(0));
+                }
+
+                //
             }
 
             // Generate a new key for the next request
@@ -1599,9 +1696,17 @@ fn SetIntSetting(id: i32, value: isize) {
 }
 
 /// Get a TEXT value from the settings database
-fn GetTextSetting(id: i32) -> usize {
+fn GetTextSetting(id: i32) -> String {
     let cmd = format!("GetTextSetting={}", id);
-    send_cmd(&cmd, "GetTextSetting() failed").as_str().unwrap().parse::<usize>().unwrap()
+    let answer = send_cmd(&cmd, "GetTextSetting() failed");
+    let answer = answer.as_str().unwrap();
+    answer.to_string()
+}
+
+/// Set a TEXT value in the settings database
+fn SetTextSetting(id: i32, value: String) {
+    let cmd = format!("SetTextSetting={}={}", id, value);
+    send_cmd(&cmd, "SetTextSetting() failed");
 }
 
 /// Wrapper function to reload settings database from disc

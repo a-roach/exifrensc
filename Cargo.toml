@@ -17,6 +17,7 @@ features = [
     "Win32_System_Environment",
     "Win32_System_IO",
     "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
     "Win32_UI_Controls",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
@@ -32,6 +33,7 @@ minreq = {version="2.6.0", features = ["urlencoding"]}
 tiny_http = "0.12.0"
 urlencoding = "2.1.2"
 rand = "0.8.5"
+kamadak-exif = "0.5"
 
 [build-dependencies]
 embed-resource = "1.7.2"
