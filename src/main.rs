@@ -5,14 +5,16 @@
 use core::mem::transmute;
 use std::collections::HashMap;
 use std::convert::TryInto;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+use std::fs;
 use std::fs::File;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
-use std::{env, mem, slice, slice::from_raw_parts, str};
-use std::{fs, time};
+use std::{env, mem, slice};
 use windows::core::*;
 use windows::Win32::UI::{
     Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
@@ -416,6 +418,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 segoe_mdl2_assets.set_text(IDC_PREFSDelPattern, w!("\u{E74D}"), w!("Delete file pattern"));
                 segoe_mdl2_assets.set_text(IDC_PREFSExifToolBrowse, w!("\u{ED25}"), w!("Set path to ExifTool.exe"));
 
+                SendDlgItemMessageA(hwnd, IDC_PREFS_ExifToolPath, EM_SETLIMITTEXT, WPARAM(MAX_PATH as usize), LPARAM(0));
                 let mut ExifToolPath = GetTextSetting(IDC_PREFS_ExifToolPath);
                 ExifToolPath.push('\0');
                 let ExifToolPath = utf8_to_utf16(&ExifToolPath);
@@ -428,7 +431,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip\0").as_ptr() as isize));
                 SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
 
-                SendDlgItemMessageW(hwnd, IDC_PREFS_EXIF_Engine, CB_ADDSTRING, WPARAM(0), LPARAM(w!("ExifTool\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_EXIF_Engine, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Phil Harvey's ExifTool\0").as_ptr() as isize));
                 SendDlgItemMessageW(hwnd, IDC_PREFS_EXIF_Engine, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Kamadak EXIF\0").as_ptr() as isize));
                 SendDlgItemMessageA(hwnd, IDC_PREFS_EXIF_Engine, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_EXIF_Engine)), LPARAM(0));
                 segoe_mdl2_assets.set_text(
@@ -985,16 +988,15 @@ impl WindowsControlText {
         }
     }
 
-    /**
-     * Set the caption and tool tip text of a windows control.
-     **/
+    /// Set the caption and tool tip text of a windows control.
+    /// If we set the caption, the font of the control is also set. If you only want to set the font, use the setfont option.
+    /// If we only set the tooltip, not fonts are changed. It is just a short cut for setting a tooltip.
     fn set_text(&self, id: i32, caption: PCWSTR, tooltip_text: PCWSTR) {
         unsafe {
             let hinst = GetModuleHandleA(None).unwrap();
 
             if caption != w!("") {
                 SendDlgItemMessageA(self.hwnd, id, WM_SETFONT, WPARAM(self.hfont.0 as usize), LPARAM(0));
-
                 SetDlgItemTextW(self.hwnd, id, caption);
             }
 
@@ -1032,6 +1034,7 @@ impl WindowsControlText {
         }
     }
 
+    /// Set the font of a windows control.
     fn set_font(&self, id: i32) {
         unsafe {
             let hinst = GetModuleHandleA(None).unwrap();
@@ -1039,9 +1042,7 @@ impl WindowsControlText {
         }
     }
 
-    /**
-     *  Delete the font resource when we are done with it
-     **/
+    /// Delete the font resource when we are done with it.
     fn destroy(&self) {
         unsafe {
             DeleteObject(self.hfont);
@@ -1058,6 +1059,7 @@ fn utf8_to_utf16(utf8_in: &str) -> Vec<u16> {
     utf8_in.encode_utf16().collect()
 }
 
+/// Opens up a dialog so a user can select multiple image files and inser into our database.
 //fn LoadFile() -> Result<()> {
 fn LoadPictureFiles() {
     unsafe {
@@ -1181,6 +1183,8 @@ fn LoadPictureFiles() {
     //    Ok(())
 }
 
+/// Opens a dialog and lets users pick a folder of pictures to rename.
+/// Automatically inserts into our database.    
 //fn LoadDirectory() -> Result<()> {
 fn LoadDirectoryOfPictures() {
     println!("Directory open");
@@ -1305,13 +1309,170 @@ fn CheckAndAddThisFile(file_path: String) {
         let created_datetime = get_file_created_timestamp_as_iso8601(&test_Path);
         let orig_file_name = test_Path.file_name().unwrap().to_os_string().into_string().unwrap();
 
-        let file = std::fs::File::open(file_path.clone()).unwrap();
-        let mut bufreader = std::io::BufReader::new(&file);
-        let exifreader = exif::Reader::new();
-        let exif = exifreader.read_from_container(&mut bufreader).unwrap();
-        for f in exif.fields() {
-            if f.ifd_num == In::PRIMARY && f.tag.description().is_some() && f.tag.to_string() != "MakerNote" {
-                println!("{}, {}~~{}", f.tag.number(), f.tag, f.display_value().with_unit(&exif));
+        /*
+         * Pick our exif engine
+         * Each have their own pros and cons. The Kamadak EXIF engine is compiled within the program,
+         * is quite quick, but does not decode as many tags as ExifTool, and also sometimes get tags
+         * a little wrong. Exiftool is quite bullet proof when it comes to decoding, but is noticable
+         * slower, but you do get many, many more tags (none of which you may want or need for simple
+         * renaming tasks).
+         */
+        if GetIntSetting(IDC_PREFS_EXIF_Engine) == 1 {
+            // Kamadak EXIF
+            let file = std::fs::File::open(file_path.clone()).unwrap();
+            let mut bufreader = std::io::BufReader::new(&file);
+            let exifreader = exif::Reader::new();
+
+            if let Ok(exif) = exifreader.read_from_container(&mut bufreader) {
+                for f in exif.fields() {
+                    if f.ifd_num == In::PRIMARY && f.tag.description().is_some() && f.tag.to_string() != "MakerNote" && f.display_value().to_string() != "0x00000000000000000000000000" {
+                        let cmd = format!(
+                            "INSERT OR IGNORE INTO exif (path,tag,tag_id,value) VALUES('{}','{}',{},'{}');",
+                            file_path,
+                            f.tag,
+                            f.tag.number(),
+                            f.display_value().to_string().replace('\"', "").trim()
+                        );
+                        QuickNonReturningSqlCommand(cmd);
+                    }
+                }
+            }
+        } else {
+            // Phil Harvey's ExifTool
+
+            let file_path_copy = file_path.clone();
+            // Set up a channel to let our threads talk to each other
+            // We will copy the transmitter so both stderr and stdout have transmitters,
+            // but we will have only one receiver in our main thread.
+            let (stdout_transmitter, rx) = mpsc::channel();
+            let stderr_transmitter = stdout_transmitter.clone();
+
+            // Create a new process and spawn ExifTool into that process
+            //  • I have ExifTool in my search path, so do not need to specify its absolute path
+            //  • We are going to run ExifTool in "stay open" mode and send commands to it from stdin.
+            //    Because of this, we need to steal stdin for input, stdout to capture the output, and
+            //    stderr so we can monitor for errors. Parsing stderr and stdout will ultimately happen
+            //    in parallel threads so we don't lock up anything.
+            //
+            let mut exiftool_process = Command::new("ExifTool.exe")
+                .args(["-stay_open", "true", "-@", "-"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            // Take ownership of stdout so we can pass to a separate thread.
+            let exiftool_stdout = exiftool_process.stdout.take().expect("Could not take stdout");
+
+            // Take ownership of stdin so we can pass to a separate thread.
+            let exiftool_stderr = exiftool_process.stderr.take().expect("Could not take stderr");
+
+            // Grab stdin so we can pipe commands to ExifTool
+            let exiftool_stdin = exiftool_process.stdin.as_mut().unwrap();
+
+            // Create a separate thread to loop over stdout
+            // We are not going to join the tread or anything like that, so we don't need the return
+            // value, but if we did want to do something with it, we could.
+            let _stdout_thread = thread::spawn(move || {
+                let stdout_lines = BufReader::new(exiftool_stdout).lines();
+
+                for line in stdout_lines {
+                    let line = line.unwrap();
+
+                    // Check to see if our processing has finished, if it has we will send a message to our main thread.
+                    if line == "{ready}" {
+                        stdout_transmitter.send(line).unwrap();
+                    } else {
+                        /*
+                         * Example returns from our command:
+                         *[File] - FileModifyDate: 2022:11:01 01:39:18+10:00
+                         *[EXIF] 36867 DateTimeOriginal: 2022:10:31 15:37:25
+                         *[Composite] - SubSecCreateDate: 2022:10:31 15:37:25.0180+10:00
+                         *[XMP]->[XMP] - DateTimeDigitized: 2022:12:25 12:06:41+10:00
+                         *[IPTC]->[IPTC] 80 By-line: Someone
+                         *
+                         * We are not interested in the File types, binary data, or marker notes so we will not process them.
+                         */
+
+                        if !line.contains("use -b option to extract)") {
+                            let exif_type_delimeter = line.find(' ').unwrap();
+                            let exif_type = line.get(..exif_type_delimeter).unwrap();
+                            if exif_type == "[EXIF]" || exif_type == "[IPTC]" {
+                                if let Some(exif_tag_delimeter) = line.get(7..).unwrap().find(' ') {
+                                    if let Some(exif_id) = line.get(7..7 + exif_tag_delimeter) {
+                                        if let Some(exif_value_delimeter) = line.find(':') {
+                                            if let Some(exif_tag) = line.get(7 + exif_tag_delimeter + 1..exif_value_delimeter) {
+                                                if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
+                                                    if !exif_value.is_empty() {
+                                                        let cmd = format!(
+                                                            "INSERT OR IGNORE INTO exif (path,tag,tag_id,value) VALUES('{}','{}',{},'{}');",
+                                                            file_path_copy,
+                                                            exif_tag,
+                                                            exif_id,
+                                                            exif_value.to_string().replace('\"', "")
+                                                        );
+                                                        QuickNonReturningSqlCommand(cmd);
+                                                    }
+                                                } else {
+                                                    sWarning!("Extracting exif_value failed.");
+                                                }
+                                            } else {
+                                                sWarning!("Extracting failed.");
+                                            }
+                                        } else {
+                                            sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                        }
+                                    } else {
+                                        sWarning!("exif_id failed");
+                                    }
+                                } else {
+                                    sWarning!("exif_tag_delimeter failed");
+                                }
+                            } else if exif_type == "[Composite]" || exif_type == "[XMP]" {
+                                if let Some(exif_value_delimeter) = line.find(':') {
+                                    if let Some(exif_tag) = line.get(exif_type_delimeter + 3..exif_value_delimeter) {
+                                        if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
+                                            if !exif_value.is_empty() {
+                                                let cmd = format!("INSERT OR IGNORE INTO exif (path,tag,value) VALUES('{}','{}','{}');", file_path_copy, exif_tag, exif_value.to_string().replace('\"', ""));
+                                                QuickNonReturningSqlCommand(cmd);
+                                            }
+                                        } else {
+                                            sWarning!("Extracting exif_value failed.");
+                                        }
+                                    } else {
+                                        sWarning!("Extracting exif_tag failed.");
+                                    }
+                                } else {
+                                    sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Create a separate thread to loop over stderr
+            // Anything which comes through stderr will just be sent back to our calling thread, and will trip an error.
+            let _stderr_thread = thread::spawn(move || {
+                let stderr_lines = BufReader::new(exiftool_stderr).lines();
+                for line in stderr_lines {
+                    let line = line.unwrap();
+                    stderr_transmitter.send(line).unwrap();
+                }
+            });
+
+            // Send a command through to ExifTool using its stdin pipe, then wait for a response from the thread.
+            // If successful we should get "{ready}", in which case we could send our next command if we wanted to.
+            // We have to send as "bytes" rather than rust's default UTF16.
+            let exif_cmd = format!("-G\n-D\n-s2\n-f\n-n\n{}\n-execute\n", file_path);
+            println!("{}", exif_cmd);
+            exiftool_stdin.write(exif_cmd.as_bytes());
+            let received = rx.recv().unwrap(); // wait for the command to finish
+            if received == "{ready}" {
+                println!("Command seemed to run successfully 😊, so in theory we could fire off another now because ExifTool is ready and waiting, but we will exit instead.");
+            } else {
+                println!("Well, that,{}, was not expected!🤔", received);
             }
         }
 
@@ -1320,11 +1481,9 @@ fn CheckAndAddThisFile(file_path: String) {
                 "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
                 file_path, created_datetime, orig_file_name, nksc_path
             );
-            println!("{}", cmd);
             QuickNonReturningSqlCommand(cmd);
         } else {
             let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", file_path, created_datetime, orig_file_name);
-            println!("{}", cmd);
             QuickNonReturningSqlCommand(cmd);
         }
     }
@@ -1478,6 +1637,7 @@ fn mem_db() {
                 CREATE TABLE exif (
                     path TEXT NOT NULL, /* Full path to the original image file */
                     tag TEXT NOT NULL, /* An exif TAG shorhand in text, as opposed to ID */
+                    tag_id,
                     value TEXT NOT NULL, /* The value of the exif tag */
                 
                     UNIQUE(path,tag)
@@ -1768,6 +1928,11 @@ fn ApplySettings(hwnd: HWND) {
         SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DRAG_N_DROP, SendDlgItemMessageA(hwnd, IDC_PREFS_DRAG_N_DROP, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_EXIF_Engine, SendDlgItemMessageA(hwnd, IDC_PREFS_EXIF_Engine, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        let mut tmp_text: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];
+        let len = GetWindowTextW(GetDlgItem(hwnd, IDC_PREFS_ExifToolPath), &mut tmp_text);
+        let exif_tool_path = String::from_utf16_lossy(&tmp_text[..len as usize]);
+        SetTextSetting(IDC_PREFS_ExifToolPath, exif_tool_path);
         SetIntSetting(IDC_PREFS_NX_STUDIO, IsDlgButtonChecked(hwnd, IDC_PREFS_NX_STUDIO).try_into().unwrap());
     }
 }
