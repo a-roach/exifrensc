@@ -13,7 +13,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::{env, mem, slice};
@@ -73,7 +73,7 @@ macro_rules! FailU {
 pub static mut path_to_settings_sqlite: String = String::new();
 pub static mut MAIN_HWND: HWND = windows::Win32::Foundation::HWND(0);
 pub static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
-static mut MAIN_THREAD_ID: u32 = 0; // The tread ID of our main process
+static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
 
@@ -1227,75 +1227,244 @@ fn get_nksc_file_path(file_to_check: &PathBuf) -> String {
 /// Function makes two passes, the first time looking for the Nikon params directory, from which it will grab a copy internally
 /// so it can map out where the corrosponding entry is, then it looks for the files.
 fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
-    if WhichDirectory.is_dir()
-    // sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
-    {
-        let nksc_param_path = WhichDirectory.clone().join("NKSC_PARAM");
-        let mut nksc_param_paths = HashMap::new();
-        let mut nksc_path = String::new();
-        let mut nksc_name = String::new();
+    unsafe {
+        if WhichDirectory.is_dir()
+        // sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
+        {
+            let nksc_param_path = WhichDirectory.clone().join("NKSC_PARAM");
+            let mut nksc_param_paths = HashMap::new();
+            let mut nksc_path = String::new();
+            let mut nksc_name = String::new();
+            let (stdout_transmitter, rx) = mpsc::channel();
+            let stderr_transmitter = stdout_transmitter.clone();
+            let tmpbuf: [u8; 8] = [0; 8]; // ChildStdin is private internally so for now we'll reserve a block of memory for it 🙄
+            let mut exiftool_stdin: std::process::ChildStdin = transmute(tmpbuf.as_ptr());
+            let engine = GetIntSetting(IDC_PREFS_EXIF_Engine);
 
-        /*
-         * First look for the sidecar directory, nksc, then populate our HashMap with the key,
-         * which is just the equivalent .nef name, and the value is the path to the sidecar file.
-         */
-        if nksc_param_path.exists() && nksc_param_path.is_dir() {
-            let paths = fs::read_dir(nksc_param_path).expect("Could not scan the NIKON_PARAM directory 😥.");
+            /*
+             * If we are using ExifTool, we will run the program and keep it open in the backgound for now
+             */
+            if engine == 0 {
+                let ExifToolPath = GetTextSetting(IDC_PREFS_ExifToolPath);
+
+                /* 
+                 * Create a new process and spawn ExifTool into that process
+                 *  • We are going to run ExifTool in "stay open" mode and send commands to it from stdin.
+                 *    Because of this, we need to steal stdin for input, stdout to capture the output, and
+                 *    stderr so we can monitor for errors. Parsing stderr and stdout will ultimately happen
+                 *    in parallel threads so we don't lock up anything.
+                 */
+                let mut exiftool_process = Command::new(ExifToolPath)
+                    .args(["-stay_open", "true", "-@", "-"])
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                    .unwrap();
+
+                // Take ownership of stdout so we can pass to a separate thread.
+                let exiftool_stdout = exiftool_process.stdout.take().expect("Could not take stdout");
+
+                // Take ownership of stdin so we can pass to a separate thread.
+                let exiftool_stderr = exiftool_process.stderr.take().expect("Could not take stderr");
+
+                // Grab stdin so we can pipe commands to ExifTool
+                exiftool_stdin = exiftool_process.stdin.unwrap();
+
+                // Create a separate thread to loop over stdout
+                let _stdout_thread = thread::spawn(move || {
+                    let stdout_lines = BufReader::new(exiftool_stdout).lines();
+
+                    for line in stdout_lines {
+                        let line = line.unwrap();
+
+                        // Check to see if our processing has finished, if it has we will send a message to our main thread.
+                        if line == "{ready}" {
+                            stdout_transmitter.send(line).unwrap();
+                        } else {
+                            /*
+                             * Example returns from our command:
+                             *[File] - FileModifyDate: 2022:11:01 01:39:18+10:00
+                             *[EXIF] 36867 DateTimeOriginal: 2022:10:31 15:37:25
+                             *[Composite] - SubSecCreateDate: 2022:10:31 15:37:25.0180+10:00
+                             *[XMP]->[XMP] - DateTimeDigitized: 2022:12:25 12:06:41+10:00
+                             *[IPTC]->[IPTC] 80 By-line: Someone
+                             *
+                             * We are not interested in the File types, binary data, or marker notes so we will not process them.
+                             */
+
+                            if !line.contains("use -b option to extract)") {
+                                let exif_type_delimeter = line.find(' ').unwrap();
+                                let exif_type = line.get(..exif_type_delimeter).unwrap();
+                                if exif_type == "[EXIF]" || exif_type == "[IPTC]" {
+                                    if let Some(exif_tag_delimeter) = line.get(7..).unwrap().find(' ') {
+                                        if let Some(exif_id) = line.get(7..7 + exif_tag_delimeter) {
+                                            if let Some(exif_value_delimeter) = line.find(':') {
+                                                if let Some(exif_tag) = line.get(7 + exif_tag_delimeter + 1..exif_value_delimeter) {
+                                                    if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
+                                                        if !exif_value.is_empty() {
+                                                            let cmd = format!("INSERT OR IGNORE INTO exif (path,tag,tag_id,value) VALUES('file_path','{}',{},'{}');", exif_tag, exif_id, exif_value.to_string().replace('\"', ""));
+                                                            QuickNonReturningSqlCommand(cmd);
+                                                        }
+                                                    } else {
+                                                        sWarning!("Extracting exif_value failed.");
+                                                    }
+                                                } else {
+                                                    sWarning!("Extracting failed.");
+                                                }
+                                            } else {
+                                                sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                            }
+                                        } else {
+                                            sWarning!("exif_id failed");
+                                        }
+                                    } else {
+                                        sWarning!("exif_tag_delimeter failed");
+                                    }
+                                } else if exif_type == "[Composite]" || exif_type == "[XMP]" {
+                                    if let Some(exif_value_delimeter) = line.find(':') {
+                                        if let Some(exif_tag) = line.get(exif_type_delimeter + 3..exif_value_delimeter) {
+                                            if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
+                                                if !exif_value.is_empty() {
+                                                    let cmd = format!("INSERT OR IGNORE INTO exif (path,tag,value) VALUES('file_path','{}','{}');", exif_tag, exif_value.to_string().replace('\"', ""));
+                                                    QuickNonReturningSqlCommand(cmd);
+                                                }
+                                            } else {
+                                                sWarning!("Extracting exif_value failed.");
+                                            }
+                                        } else {
+                                            sWarning!("Extracting exif_tag failed.");
+                                        }
+                                    } else {
+                                        sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                /* 
+                 * Create a separate thread to loop over stderr
+                 * Anything which comes through stderr will just be sent back to our calling thread, and will trip an error.
+                 */ 
+                let _stderr_thread = thread::spawn(move || {
+                    let stderr_lines = BufReader::new(exiftool_stderr).lines();
+                    for line in stderr_lines {
+                        let line = line.unwrap();
+                        stderr_transmitter.send(line).unwrap();
+                    }
+                });
+            }
+
+            /*
+             * First look for the sidecar directory, nksc, then populate our HashMap with the key,
+             * which is just the equivalent .nef name, and the value is the path to the sidecar file.
+             */
+            if nksc_param_path.exists() && nksc_param_path.is_dir() {
+                let paths = fs::read_dir(nksc_param_path).expect("Could not scan the NIKON_PARAM directory 😥.");
+                for each_path in paths {
+                    let file_path = each_path.unwrap();
+
+                    if file_path.path().is_file() && file_path.path().extension() == Some(OsStr::new("nksc")) {
+                        nksc_path = format!("{}", file_path.path().display());
+                        let file_delimeter = nksc_path.rfind('\\').unwrap();
+                        let last_extension_delimeter = nksc_path.rfind('.').unwrap();
+                        nksc_name = nksc_path.trim()[file_delimeter + 1..last_extension_delimeter].to_string();
+
+                        nksc_param_paths.insert(nksc_name, nksc_path);
+                    }
+                }
+            }
+
+            /*
+             * Now we will look for the files in the directory we just dropped, check to see if there is an associated
+             * sidecar file, then add them to our in memory database.
+             */
+            let paths = fs::read_dir(WhichDirectory).expect("Could not scan the directory 😥.");
             for each_path in paths {
                 let file_path = each_path.unwrap();
 
-                if file_path.path().is_file() && file_path.path().extension() == Some(OsStr::new("nksc")) {
-                    nksc_path = format!("{}", file_path.path().display());
-                    let file_delimeter = nksc_path.rfind('\\').unwrap();
-                    let last_extension_delimeter = nksc_path.rfind('.').unwrap();
-                    nksc_name = nksc_path.trim()[file_delimeter + 1..last_extension_delimeter].to_string();
+                if (file_path.path().is_file()) {
+                    let created_datetime = get_file_created_timestamp_as_iso8601(&file_path.path());
 
-                    nksc_param_paths.insert(nksc_name, nksc_path);
+                    /*
+                     * Get the file name and path as a string from the PathBuf
+                     */
+                    let this_file_path = file_path.path().into_os_string().into_string().unwrap();
+                    let file_name = file_path.path().file_name().unwrap().to_os_string().into_string().unwrap();
+
+                    /*
+                     * Insert into the database next
+                     */
+                    match nksc_param_paths.get_key_value(&file_name) {
+                        Some(file_path) => {
+                            let cmd = format!(
+                                "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
+                                this_file_path, created_datetime, file_name, file_path.1
+                            );
+                            QuickNonReturningSqlCommand(cmd);
+                        }
+                        _ => {
+                            let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", this_file_path, created_datetime, file_name);
+                            QuickNonReturningSqlCommand(cmd);
+                        }
+                    }
+
+                    /*
+                     * Next we will read the Exif data and insert into our database
+                     */
+                    if engine == 1 {
+                        // Kamadak EXIF
+                        let file = std::fs::File::open(file_path.path()).unwrap();
+                        let mut bufreader = std::io::BufReader::new(&file);
+                        let exifreader = exif::Reader::new();
+
+                        if let Ok(exif) = exifreader.read_from_container(&mut bufreader) {
+                            for f in exif.fields() {
+                                if f.ifd_num == In::PRIMARY && f.tag.description().is_some() && f.tag.to_string() != "MakerNote" && f.display_value().to_string() != "0x00000000000000000000000000" {
+                                    let cmd = format!(
+                                        "INSERT OR IGNORE INTO exif (path,tag,tag_id,value) VALUES('{}','{}',{},'{}');",
+                                        file_path.path().as_os_str().to_string_lossy().clone(),
+                                        f.tag,
+                                        f.tag.number(),
+                                        f.display_value().to_string().replace('\"', "").trim()
+                                    );
+                                    QuickNonReturningSqlCommand(cmd);
+                                }
+                            }
+                        }
+                    } else {
+                        /*
+                         * Send a command through to ExifTool using its stdin pipe, then wait for a response from the thread.
+                         * We have to send as "bytes" rather than rust's default UTF16.
+                         */
+                        let exif_cmd = format!("-G\n-D\n-s2\n-f\n-n\n{}\n-execute\n", file_path.path().as_os_str().to_string_lossy());
+                        exiftool_stdin.write_all(exif_cmd.as_bytes()).expect("Failed to pipe a command to ExifTool.😥");
+                        let received = rx.recv().unwrap(); // wait for the command to finish
+                        if received == "{ready}" {
+                            let cmd = format!("UPDATE exif SET path='{}' WHERE path='file_path';", file_path.path().as_os_str().to_string_lossy());
+                            QuickNonReturningSqlCommand(cmd);
+                        } else {
+                            let mut warn = format!("Well, that,\"{}\", was not expected!🤔\0", received);
+                            MessageBoxA(None, PCSTR(warn.as_mut_ptr()), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
+                        }
+                    }
+                } else {
+                    /* Directory, at this stage no plans to add recursion, but this is where we would put it. For now,
+                     * we will just use it to potentially parse and/or find the nikon params directory
+                     */
                 }
             }
-        }
-
-        /*
-         * Now we will look for the files in the directory we just dropped, check to see if there is an associated
-         * sidecar file, then add them to our in memory database.
-         */
-        let paths = fs::read_dir(WhichDirectory).expect("Could not scan the directory 😥.");
-        for each_path in paths {
-            let file_path = each_path.unwrap();
-
-            if (file_path.path().is_file()) {
-                let created_datetime = get_file_created_timestamp_as_iso8601(&file_path.path());
-
-                /*
-                 * Get the file name and path as a string from the PathBuf
-                 */
-                let this_file_path = file_path.path().into_os_string().into_string().unwrap();
-                let file_name = file_path.path().file_name().unwrap().to_os_string().into_string().unwrap();
-
-                /*
-                 * Insert into the database next
-                 */
-                match nksc_param_paths.get_key_value(&file_name) {
-                    Some(file_path) => {
-                        let cmd = format!(
-                            "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
-                            this_file_path, created_datetime, file_name, file_path.1
-                        );
-                        QuickNonReturningSqlCommand(cmd);
-                    }
-                    _ => {
-                        let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", this_file_path, created_datetime, file_name);
-                        QuickNonReturningSqlCommand(cmd);
-                    }
-                }
-            } else {
-                /* Directory, at this stage no plans to add recursion, but this is where we would put it. For now,
-                 * we will just use it to potentially parse and/or find the nikon params directory
-                 */
+            /*
+             * Shutdown Exiftool
+             */
+            if engine == 0 {
+                exiftool_stdin.write_all(b"-stay_open\nfalse\n-execute\n").expect("Failed to pipe a command to ExifTool.😥");
             }
+        } else {
+            println!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
         }
-    } else {
-        println!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
     }
 }
 
@@ -1337,22 +1506,18 @@ fn CheckAndAddThisFile(file_path: String) {
             }
         } else {
             // Phil Harvey's ExifTool
-
+            let ExifToolPath = GetTextSetting(IDC_PREFS_ExifToolPath);
             let file_path_copy = file_path.clone();
-            // Set up a channel to let our threads talk to each other
-            // We will copy the transmitter so both stderr and stdout have transmitters,
-            // but we will have only one receiver in our main thread.
+            /* 
+             * Set up a channel to let our threads talk to each other
+             * We will copy the transmitter so both stderr and stdout have transmitters,
+             * but we will have only one receiver in our main thread.
+             */ 
             let (stdout_transmitter, rx) = mpsc::channel();
             let stderr_transmitter = stdout_transmitter.clone();
 
             // Create a new process and spawn ExifTool into that process
-            //  • I have ExifTool in my search path, so do not need to specify its absolute path
-            //  • We are going to run ExifTool in "stay open" mode and send commands to it from stdin.
-            //    Because of this, we need to steal stdin for input, stdout to capture the output, and
-            //    stderr so we can monitor for errors. Parsing stderr and stdout will ultimately happen
-            //    in parallel threads so we don't lock up anything.
-            //
-            let mut exiftool_process = Command::new("ExifTool.exe")
+            let mut exiftool_process = Command::new(ExifToolPath)
                 .args(["-stay_open", "true", "-@", "-"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
@@ -1370,8 +1535,6 @@ fn CheckAndAddThisFile(file_path: String) {
             let exiftool_stdin = exiftool_process.stdin.as_mut().unwrap();
 
             // Create a separate thread to loop over stdout
-            // We are not going to join the tread or anything like that, so we don't need the return
-            // value, but if we did want to do something with it, we could.
             let _stdout_thread = thread::spawn(move || {
                 let stdout_lines = BufReader::new(exiftool_stdout).lines();
 
@@ -1382,17 +1545,6 @@ fn CheckAndAddThisFile(file_path: String) {
                     if line == "{ready}" {
                         stdout_transmitter.send(line).unwrap();
                     } else {
-                        /*
-                         * Example returns from our command:
-                         *[File] - FileModifyDate: 2022:11:01 01:39:18+10:00
-                         *[EXIF] 36867 DateTimeOriginal: 2022:10:31 15:37:25
-                         *[Composite] - SubSecCreateDate: 2022:10:31 15:37:25.0180+10:00
-                         *[XMP]->[XMP] - DateTimeDigitized: 2022:12:25 12:06:41+10:00
-                         *[IPTC]->[IPTC] 80 By-line: Someone
-                         *
-                         * We are not interested in the File types, binary data, or marker notes so we will not process them.
-                         */
-
                         if !line.contains("use -b option to extract)") {
                             let exif_type_delimeter = line.find(' ').unwrap();
                             let exif_type = line.get(..exif_type_delimeter).unwrap();
@@ -1450,8 +1602,10 @@ fn CheckAndAddThisFile(file_path: String) {
                 }
             });
 
-            // Create a separate thread to loop over stderr
-            // Anything which comes through stderr will just be sent back to our calling thread, and will trip an error.
+            /* 
+             * Create a separate thread to loop over stderr
+             * Anything which comes through stderr will just be sent back to our calling thread, and will trip an error.
+             */ 
             let _stderr_thread = thread::spawn(move || {
                 let stderr_lines = BufReader::new(exiftool_stderr).lines();
                 for line in stderr_lines {
@@ -1460,12 +1614,15 @@ fn CheckAndAddThisFile(file_path: String) {
                 }
             });
 
-            // Send a command through to ExifTool using its stdin pipe, then wait for a response from the thread.
-            // If successful we should get "{ready}", in which case we could send our next command if we wanted to.
-            // We have to send as "bytes" rather than rust's default UTF16.
+            /* 
+             * Send a command through to ExifTool using its stdin pipe, then wait for a response from the thread.
+             * If successful we should get "{ready}", in which case we could send our next command if we wanted to.
+             * We have to send as "bytes" rather than rust's default UTF16.
+             */ 
             let exif_cmd = format!("-G\n-D\n-s2\n-f\n-n\n{}\n-execute\n", file_path);
             exiftool_stdin.write_all(exif_cmd.as_bytes()).expect("Failed to pipe a command to ExifTool.😥");
             let received = rx.recv().unwrap(); // wait for the command to finish
+            exiftool_stdin.write_all(b"-stay_open\nfalse\n-execute\n").expect("Failed to pipe a command to ExifTool.😥");
             if received != "{ready}" {
                 let mut warn = format!("Well, that,\"{}\", was not expected!🤔\0", received);
                 unsafe {
