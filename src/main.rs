@@ -13,7 +13,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
+use std::ptr::null;
 use std::sync::mpsc;
 use std::thread;
 use std::{env, mem, slice};
@@ -41,9 +42,7 @@ include!("resource_defs.rs");
 
 macro_rules! Warning {
     ($a:expr) => {
-        unsafe {
-            MessageBoxA(None, s!($a), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
-        }
+        MessageBoxA(None, s!($a), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
     };
 }
 
@@ -74,8 +73,13 @@ pub static mut path_to_settings_sqlite: String = String::new();
 pub static mut MAIN_HWND: HWND = windows::Win32::Foundation::HWND(0);
 pub static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
 static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
+static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) };
+
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
+pub const KAMADAK_EXIF: usize = 1;
+pub const EXIFTOOL: usize = 0;
+pub const BAR_MARQUEE: isize = 0;
 
 // Some definitions seemingly missing, as of coding, from the windows crate
 pub const NM_CLICK: u32 = 4294967195;
@@ -273,18 +277,17 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             LoadDirectoryOfPictures();
                         }
                         IDC_MAIN_SAVE => {
-                            LoadPictureFiles();
-                        }
-                        IDC_MAIN_DELETE => {
                             send_cmd("Quit", "Quit failed"); // Just for testing
                         }
+                        IDC_MAIN_DELETE => {
+                            thinking.make_marquee();
+                        }
                         IDC_MAIN_ERASE => {
-                            let _thinking_thread = thread::spawn(move || {
-                                thinking();
-                            });
+                            //     thinking.launch(100, PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
+                            thinking.launch(100, PCWSTR(null()));
                         }
                         IDC_MAIN_SYNC => {
-                            LoadPictureFiles();
+                            thinking.kill();
                         }
                         IDC_MAIN_SETTINGS => {
                             DialogBoxParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
@@ -890,20 +893,119 @@ fn set_icon(hwnd: HWND) {
     }
 }
 
-/// Progress bar to show we are doing something
-// CONTROL         "", IDC_PROGRESS, PROGRESS_CLASS, PBS_MARQUEE, 8, 14, 171, 11, WS_EX_LEFT
-fn thinking() {
-    unsafe {
-        let hinst = GetModuleHandleA(None).unwrap();
-        DialogBoxParamA(hinst, PCSTR(IDD_THINKING as *mut u8), HWND(0), Some(thinking_dlg_proc), LPARAM(0));
+struct Thinking {
+    thread_id: u32,
+    hwnd: HWND,
+}
+
+/// Progress bar functions to show we are doing things
+impl Thinking {
+ 
+    /// Launches a progress bar.
+    /// If nCount = 0, or BAR_MARQUEE, then the bar is launched as a marquee bar with an indeterminate range.
+    /// If nCount >0, then the bar is launched as a range bar with the maximum range set to nCount.
+    /// if caption is null(), then the caption will default to "Thinking"
+    // CONTROL         "", IDC_PROGRESS, PROGRESS_CLASS, PBS_MARQUEE, 8, 14, 171, 11, WS_EX_LEFT
+    #[allow(dead_code)]
+    fn launch(&mut self, nCount: isize, caption: PCWSTR) {
+        if self.thread_id == 0 {
+            let (thread_id_tx, thread_id_rx) = mpsc::channel();
+            let (hwnd_tx, hwnd_rx) = mpsc::channel();
+            let range: isize = nCount << 16;
+
+            let _thinking_thread = thread::spawn(move || unsafe {
+                let hinst = GetModuleHandleA(None).unwrap();
+                thread_id_tx.send(GetCurrentThreadId()).unwrap();
+                let hwnd = CreateDialogParamA(hinst, PCSTR(IDD_THINKING as *mut u8), HWND(0), Some(thinking_dlg_proc), LPARAM(range));
+                hwnd_tx.send(hwnd).unwrap();
+                let mut message = MSG::default();
+                while GetMessageA(&mut message, HWND(0), 0, 0).into() {
+                    if (IsDialogMessageA(hwnd, &message) == false) {
+                        TranslateMessage(&message);
+                        DispatchMessageA(&message);
+                    }
+                }
+            });
+
+            self.thread_id = thread_id_rx.recv().unwrap();
+            self.hwnd = hwnd_rx.recv().unwrap();
+            if !caption.is_null() {
+                unsafe {
+                    SetWindowTextW(self.hwnd, caption);
+                }
+            }
+        }
+    }
+
+    /// Kills the progress bar.
+    #[allow(dead_code)]
+    fn kill(&mut self) {
+        unsafe {
+            PostThreadMessageA(self.thread_id, WM_QUIT, WPARAM(1), LPARAM(0));
+            self.thread_id = 0;
+            self.hwnd = HWND(0);
+        }
+    }
+
+    /// Changes our progress bar to a marquee progress bar.
+    #[allow(dead_code)]
+    fn make_marquee(&mut self) {
+        unsafe {
+            let mut current_style: isize = GetWindowLongPtrA(GetDlgItem(self.hwnd, IDC_PROGRESS), GWL_STYLE);
+            current_style |= PBS_MARQUEE as isize;
+
+            SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETMARQUEE, WPARAM(1), LPARAM(0));
+            SetWindowLongPtrA(GetDlgItem(self.hwnd, IDC_PROGRESS), GWL_STYLE, (current_style));
+            BringWindowToTop(self.hwnd);
+        }
+    }
+
+    /// Changes our progress bar to a range progress bar.
+    /// nCount = max range
+    #[allow(dead_code)]
+    fn make_range(&mut self, nCount: isize) {
+        unsafe {
+            let mut current_style: isize = GetWindowLongPtrA(GetDlgItem(self.hwnd, IDC_PROGRESS), GWL_STYLE);
+            current_style ^= PBS_MARQUEE as isize;
+            let range: isize = nCount << 16;
+
+            SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETSTEP, WPARAM(1), LPARAM(0));
+            SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETRANGE, WPARAM(0), LPARAM(range));
+            BringWindowToTop(self.hwnd);
+        }
+    }
+
+    /// Increments our progress bar
+    /// n = the number to increase it by.
+    // If n > 0, then we use getpos/setpos to move the progress bar, otherwise we just use step.
+    #[allow(dead_code)]
+    fn step(&mut self, n: isize) {
+        unsafe {
+            if n > 0 {
+                let current_position = SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_GETPOS, WPARAM(0), LPARAM(0));
+                let new_position = current_position.0 + n;
+                SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETPOS, WPARAM(new_position.try_into().unwrap()), LPARAM(0));
+            } else {
+                SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_STEPIT, WPARAM(0), LPARAM(0));
+            }
+            BringWindowToTop(self.hwnd);
+        }
+    }
+
+    /// Changes our progress bar's title.
+    #[allow(dead_code)]
+    fn set_caption(&mut self, caption: PCWSTR) {
+        unsafe {
+            SetWindowTextW(self.hwnd, caption);
+            BringWindowToTop(self.hwnd);
+        }
     }
 }
 
-extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
+extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
         match nMsg {
             WM_INITDIALOG => {
-                set_icon(hwnd);
                 /*
                                If we wanted to modify the style of the progress bar, we might do this:
 
@@ -912,7 +1014,15 @@ extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                                  CONTROL         "", IDC_PROGRESS, PROGRESS_CLASS, PBS_MARQUEE, 8, 14, 171, 11, WS_EX_LEFT
 
                 */
-                SendDlgItemMessageA(hwnd, IDC_PROGRESS, PBM_SETMARQUEE, WPARAM(1), LPARAM(0));
+                if lParam == LPARAM(0) {
+                    SendDlgItemMessageA(hwnd, IDC_PROGRESS, PBM_SETMARQUEE, WPARAM(1), LPARAM(0));
+                } else {
+                    let mut current_style: isize = GetWindowLongPtrA(GetDlgItem(hwnd, IDC_PROGRESS), GWL_STYLE);
+                    current_style ^= PBS_MARQUEE as isize;
+                    SetWindowLongPtrA(GetDlgItem(hwnd, IDC_PROGRESS), GWL_STYLE, (current_style));
+                    SendDlgItemMessageA(hwnd, IDC_PROGRESS, PBM_SETRANGE, WPARAM(0), lParam);
+                    SendDlgItemMessageA(hwnd, IDC_PROGRESS, PBM_SETSTEP, WPARAM(1), LPARAM(0));
+                }
                 1
             }
 
@@ -923,12 +1033,17 @@ extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lPa
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
                     EndDialog(hwnd, 0);
                 }
-                0
+                1
             }
 
             WM_DESTROY => {
                 EndDialog(hwnd, 0);
-                0
+                1
+            }
+
+            WM_ACTIVATEAPP => {
+                BringWindowToTop(hwnd);
+                1
             }
             _ => 0,
         }
@@ -1185,7 +1300,6 @@ fn LoadPictureFiles() {
 /// Automatically inserts into our database.    
 //fn LoadDirectory() -> Result<()> {
 fn LoadDirectoryOfPictures() {
-    println!("Directory open");
     unsafe {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
         file_dialog.SetTitle(w!("Choose Directories of Photos to Add")).expect("SetTitle() failed in LoadDirectory()");
@@ -1224,8 +1338,8 @@ fn get_nksc_file_path(file_to_check: &PathBuf) -> String {
 
 /// Walks a directory looking for files and adding them to our in memory databse
 ///
-/// Function makes two passes, the first time looking for the Nikon params directory, from which it will grab a copy internally
-/// so it can map out where the corrosponding entry is, then it looks for the files.
+/// Function makes three passes: the first time looking for the Nikon params directory, from which it will grab a copy internally
+/// so it can map out where the corrosponding entry is; then it looks for the files; finally it fetches the exif tags for the files
 fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
     unsafe {
         if WhichDirectory.is_dir()
@@ -1242,12 +1356,12 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let engine = GetIntSetting(IDC_PREFS_EXIF_Engine);
 
             /*
-             * If we are using ExifTool, we will run the program and keep it open in the backgound for now
+             * If we are using ExifTool, we will run the ExifTool and keep it open in the backgound for now
              */
-            if engine == 0 {
+            if engine == EXIFTOOL {
                 let ExifToolPath = GetTextSetting(IDC_PREFS_ExifToolPath);
 
-                /* 
+                /*
                  * Create a new process and spawn ExifTool into that process
                  *  • We are going to run ExifTool in "stay open" mode and send commands to it from stdin.
                  *    Because of this, we need to steal stdin for input, stdout to capture the output, and
@@ -1307,19 +1421,19 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                                                             QuickNonReturningSqlCommand(cmd);
                                                         }
                                                     } else {
-                                                        sWarning!("Extracting exif_value failed.");
+                                                        Warning!("Extracting exif_value failed.");
                                                     }
                                                 } else {
-                                                    sWarning!("Extracting failed.");
+                                                    Warning!("Extracting failed.");
                                                 }
                                             } else {
-                                                sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                                Warning!("Finding exif_value_delimeter failed looking for a :");
                                             }
                                         } else {
-                                            sWarning!("exif_id failed");
+                                            Warning!("exif_id failed");
                                         }
                                     } else {
-                                        sWarning!("exif_tag_delimeter failed");
+                                        Warning!("exif_tag_delimeter failed");
                                     }
                                 } else if exif_type == "[Composite]" || exif_type == "[XMP]" {
                                     if let Some(exif_value_delimeter) = line.find(':') {
@@ -1330,13 +1444,13 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                                                     QuickNonReturningSqlCommand(cmd);
                                                 }
                                             } else {
-                                                sWarning!("Extracting exif_value failed.");
+                                                Warning!("Extracting exif_value failed.");
                                             }
                                         } else {
-                                            sWarning!("Extracting exif_tag failed.");
+                                            Warning!("Extracting exif_tag failed.");
                                         }
                                     } else {
-                                        sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                        Warning!("Finding exif_value_delimeter failed looking for a :");
                                     }
                                 }
                             }
@@ -1344,10 +1458,10 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                     }
                 });
 
-                /* 
+                /*
                  * Create a separate thread to loop over stderr
                  * Anything which comes through stderr will just be sent back to our calling thread, and will trip an error.
-                 */ 
+                 */
                 let _stderr_thread = thread::spawn(move || {
                     let stderr_lines = BufReader::new(exiftool_stderr).lines();
                     for line in stderr_lines {
@@ -1358,7 +1472,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             }
 
             /*
-             * First look for the sidecar directory, nksc, then populate our HashMap with the key,
+             * Look for the sidecar directory, nksc, then populate our HashMap with the key,
              * which is just the equivalent .nef name, and the value is the path to the sidecar file.
              */
             if nksc_param_path.exists() && nksc_param_path.is_dir() {
@@ -1382,6 +1496,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
              * sidecar file, then add them to our in memory database.
              */
             let paths = fs::read_dir(WhichDirectory).expect("Could not scan the directory 😥.");
+            //        let file_count=paths.count();
             for each_path in paths {
                 let file_path = each_path.unwrap();
 
@@ -1414,8 +1529,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                     /*
                      * Next we will read the Exif data and insert into our database
                      */
-                    if engine == 1 {
-                        // Kamadak EXIF
+                    if engine == KAMADAK_EXIF {
                         let file = std::fs::File::open(file_path.path()).unwrap();
                         let mut bufreader = std::io::BufReader::new(&file);
                         let exifreader = exif::Reader::new();
@@ -1446,8 +1560,8 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                             let cmd = format!("UPDATE exif SET path='{}' WHERE path='file_path';", file_path.path().as_os_str().to_string_lossy());
                             QuickNonReturningSqlCommand(cmd);
                         } else {
-                            let mut warn = format!("Well, that,\"{}\", was not expected!🤔\0", received);
-                            MessageBoxA(None, PCSTR(warn.as_mut_ptr()), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
+                            let mut warn = &format!("Well, that,\"{}\", was not expected!🤔\0", received);
+                            MessageBoxW(None, PCWSTR(transmute(&utf8_to_utf16(warn))), w!("Warning!"), MB_OK | MB_ICONINFORMATION);
                         }
                     }
                 } else {
@@ -1459,11 +1573,12 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             /*
              * Shutdown Exiftool
              */
-            if engine == 0 {
+            if engine == EXIFTOOL {
                 exiftool_stdin.write_all(b"-stay_open\nfalse\n-execute\n").expect("Failed to pipe a command to ExifTool.😥");
             }
         } else {
-            println!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
+            let mut warn = format!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
+            MessageBoxA(None, PCSTR(warn.as_mut_ptr()), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
         }
     }
 }
@@ -1484,8 +1599,7 @@ fn CheckAndAddThisFile(file_path: String) {
          * slower, but you do get many, many more tags (none of which you may want or need for simple
          * renaming tasks).
          */
-        if GetIntSetting(IDC_PREFS_EXIF_Engine) == 1 {
-            // Kamadak EXIF
+        if GetIntSetting(IDC_PREFS_EXIF_Engine) == KAMADAK_EXIF {
             let file = std::fs::File::open(file_path.clone()).unwrap();
             let mut bufreader = std::io::BufReader::new(&file);
             let exifreader = exif::Reader::new();
@@ -1508,11 +1622,11 @@ fn CheckAndAddThisFile(file_path: String) {
             // Phil Harvey's ExifTool
             let ExifToolPath = GetTextSetting(IDC_PREFS_ExifToolPath);
             let file_path_copy = file_path.clone();
-            /* 
+            /*
              * Set up a channel to let our threads talk to each other
              * We will copy the transmitter so both stderr and stdout have transmitters,
              * but we will have only one receiver in our main thread.
-             */ 
+             */
             let (stdout_transmitter, rx) = mpsc::channel();
             let stderr_transmitter = stdout_transmitter.clone();
 
@@ -1544,68 +1658,66 @@ fn CheckAndAddThisFile(file_path: String) {
                     // Check to see if our processing has finished, if it has we will send a message to our main thread.
                     if line == "{ready}" {
                         stdout_transmitter.send(line).unwrap();
-                    } else {
-                        if !line.contains("use -b option to extract)") {
-                            let exif_type_delimeter = line.find(' ').unwrap();
-                            let exif_type = line.get(..exif_type_delimeter).unwrap();
-                            if exif_type == "[EXIF]" || exif_type == "[IPTC]" {
-                                if let Some(exif_tag_delimeter) = line.get(7..).unwrap().find(' ') {
-                                    if let Some(exif_id) = line.get(7..7 + exif_tag_delimeter) {
-                                        if let Some(exif_value_delimeter) = line.find(':') {
-                                            if let Some(exif_tag) = line.get(7 + exif_tag_delimeter + 1..exif_value_delimeter) {
-                                                if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
-                                                    if !exif_value.is_empty() {
-                                                        let cmd = format!(
-                                                            "INSERT OR IGNORE INTO exif (path,tag,tag_id,value) VALUES('{}','{}',{},'{}');",
-                                                            file_path_copy,
-                                                            exif_tag,
-                                                            exif_id,
-                                                            exif_value.to_string().replace('\"', "")
-                                                        );
-                                                        QuickNonReturningSqlCommand(cmd);
-                                                    }
-                                                } else {
-                                                    sWarning!("Extracting exif_value failed.");
+                    } else if !line.contains("use -b option to extract)") {
+                        let exif_type_delimeter = line.find(' ').unwrap();
+                        let exif_type = line.get(..exif_type_delimeter).unwrap();
+                        if exif_type == "[EXIF]" || exif_type == "[IPTC]" {
+                            if let Some(exif_tag_delimeter) = line.get(7..).unwrap().find(' ') {
+                                if let Some(exif_id) = line.get(7..7 + exif_tag_delimeter) {
+                                    if let Some(exif_value_delimeter) = line.find(':') {
+                                        if let Some(exif_tag) = line.get(7 + exif_tag_delimeter + 1..exif_value_delimeter) {
+                                            if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
+                                                if !exif_value.is_empty() {
+                                                    let cmd = format!(
+                                                        "INSERT OR IGNORE INTO exif (path,tag,tag_id,value) VALUES('{}','{}',{},'{}');",
+                                                        file_path_copy,
+                                                        exif_tag,
+                                                        exif_id,
+                                                        exif_value.to_string().replace('\"', "")
+                                                    );
+                                                    QuickNonReturningSqlCommand(cmd);
                                                 }
                                             } else {
-                                                sWarning!("Extracting failed.");
+                                                sWarning!("Extracting exif_value failed.");
                                             }
                                         } else {
-                                            sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                            sWarning!("Extracting failed.");
                                         }
                                     } else {
-                                        sWarning!("exif_id failed");
+                                        sWarning!("Finding exif_value_delimeter failed looking for a :");
                                     }
                                 } else {
-                                    sWarning!("exif_tag_delimeter failed");
+                                    sWarning!("exif_id failed");
                                 }
-                            } else if exif_type == "[Composite]" || exif_type == "[XMP]" {
-                                if let Some(exif_value_delimeter) = line.find(':') {
-                                    if let Some(exif_tag) = line.get(exif_type_delimeter + 3..exif_value_delimeter) {
-                                        if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
-                                            if !exif_value.is_empty() {
-                                                let cmd = format!("INSERT OR IGNORE INTO exif (path,tag,value) VALUES('{}','{}','{}');", file_path_copy, exif_tag, exif_value.to_string().replace('\"', ""));
-                                                QuickNonReturningSqlCommand(cmd);
-                                            }
-                                        } else {
-                                            sWarning!("Extracting exif_value failed.");
+                            } else {
+                                sWarning!("exif_tag_delimeter failed");
+                            }
+                        } else if exif_type == "[Composite]" || exif_type == "[XMP]" {
+                            if let Some(exif_value_delimeter) = line.find(':') {
+                                if let Some(exif_tag) = line.get(exif_type_delimeter + 3..exif_value_delimeter) {
+                                    if let Some(exif_value) = line.get(exif_value_delimeter + 2..) {
+                                        if !exif_value.is_empty() {
+                                            let cmd = format!("INSERT OR IGNORE INTO exif (path,tag,value) VALUES('{}','{}','{}');", file_path_copy, exif_tag, exif_value.to_string().replace('\"', ""));
+                                            QuickNonReturningSqlCommand(cmd);
                                         }
                                     } else {
-                                        sWarning!("Extracting exif_tag failed.");
+                                        sWarning!("Extracting exif_value failed.");
                                     }
                                 } else {
-                                    sWarning!("Finding exif_value_delimeter failed looking for a :");
+                                    sWarning!("Extracting exif_tag failed.");
                                 }
+                            } else {
+                                sWarning!("Finding exif_value_delimeter failed looking for a :");
                             }
                         }
                     }
                 }
             });
 
-            /* 
+            /*
              * Create a separate thread to loop over stderr
              * Anything which comes through stderr will just be sent back to our calling thread, and will trip an error.
-             */ 
+             */
             let _stderr_thread = thread::spawn(move || {
                 let stderr_lines = BufReader::new(exiftool_stderr).lines();
                 for line in stderr_lines {
@@ -1614,11 +1726,11 @@ fn CheckAndAddThisFile(file_path: String) {
                 }
             });
 
-            /* 
+            /*
              * Send a command through to ExifTool using its stdin pipe, then wait for a response from the thread.
              * If successful we should get "{ready}", in which case we could send our next command if we wanted to.
              * We have to send as "bytes" rather than rust's default UTF16.
-             */ 
+             */
             let exif_cmd = format!("-G\n-D\n-s2\n-f\n-n\n{}\n-execute\n", file_path);
             exiftool_stdin.write_all(exif_cmd.as_bytes()).expect("Failed to pipe a command to ExifTool.😥");
             let received = rx.recv().unwrap(); // wait for the command to finish
