@@ -2,11 +2,15 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+use std::time::Duration;
+
 use super::*;
 use rand::prelude::*;
 use rusqlite::{Connection, Result};
 use tiny_http::{Response, Server};
 use urlencoding::decode;
+
+pub static mut WAIT_FOR_DB: bool = false; // Attempt to block input until the database is ready
 
 macro_rules! Fail {
     ($a:expr) => {
@@ -84,6 +88,10 @@ pub fn mem_db() {
          *  Server loop
          */
         for request in server.incoming_requests() {
+            unsafe {
+                WAIT_FOR_DB = true;
+            }
+
             // println!("received request! method: {:?}, url: {:?}, headers: {:?}", request.method(), request.url(), request.headers());
 
             /*
@@ -248,6 +256,14 @@ pub fn mem_db() {
                 let pszSpec = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
                 response = Response::from_string(pszSpec.to_string());
                 //
+            } else if command.starts_with("Begin") {
+                db.execute("BEGIN;", []).expect("Begin() failed.");
+                response = Response::from_string("Okay");
+                //
+            } else if command.starts_with("Commit") {
+                db.execute("COMMIT;", []).expect("Commit() failed.");
+                response = Response::from_string("Okay");
+                //
             } else if command.starts_with("Quit") {
                 println!("Quit");
                 unsafe {
@@ -260,8 +276,9 @@ pub fn mem_db() {
             // Generate a new key for the next request
             unsafe {
                 BONAFIDE = format!("{}", rng.gen_range(0..65535));
+                request.respond(response).unwrap();
+                WAIT_FOR_DB = false;
             }
-            request.respond(response).unwrap();
         }
     } else {
         Fail!("Could not start internal database service. 😯");
@@ -272,24 +289,33 @@ pub fn mem_db() {
 //
 // Twas a bit of a pain to write because both minreq and tinyhttp have the same "Response" name space and
 // it took a while to work out what was going wrong!
+#[allow(dead_code)]
 pub fn send_cmd(cmd: &str, error_msg: &str) -> minreq::Response {
     let cmd = format!("{}/{}", HOST_URL.to_owned(), cmd);
-    unsafe { minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect(error_msg) }
+    unsafe {
+        while WAIT_FOR_DB {
+            thread::sleep(Duration::from_millis(10));
+        }
+        minreq::get(cmd).with_header("X-Bonafide", BONAFIDE.as_str()).send().expect(error_msg)
+    }
 }
 
 /// Get an integer value from the settings database
+#[allow(dead_code)]
 pub fn GetIntSetting(id: i32) -> usize {
     let cmd = format!("GetIntSetting={}", id);
     send_cmd(&cmd, "GetIntSetting() failed").as_str().unwrap().parse::<usize>().unwrap()
 }
 
 /// Set an integer value from the settings database
+#[allow(dead_code)]
 pub fn SetIntSetting(id: i32, value: isize) {
     let cmd = format!("SetIntSetting={}={}", id, value);
     send_cmd(&cmd, "SetIntSetting() failed");
 }
 
 /// Get a TEXT value from the settings database
+#[allow(dead_code)]
 pub fn GetTextSetting(id: i32) -> String {
     let cmd = format!("GetTextSetting={}", id);
     let answer = send_cmd(&cmd, "GetTextSetting() failed");
@@ -298,6 +324,8 @@ pub fn GetTextSetting(id: i32) -> String {
 }
 
 /// Set a TEXT value in the settings database
+
+#[allow(dead_code)]
 pub fn SetTextSetting(id: i32, value: String) {
     let cmd = format!("SetTextSetting={}={}", id, value);
     send_cmd(&cmd, "SetTextSetting() failed");
@@ -309,6 +337,7 @@ pub fn ReloadSettings() {
 }
 
 /// Function to reload the settings database from disc
+#[allow(dead_code)]
 fn ReloadSettings_(db: &Connection) {
     unsafe {
         let cmd = format!(
@@ -332,11 +361,13 @@ fn ReloadSettings_(db: &Connection) {
 }
 
 /// Save the settings to disc
+#[allow(dead_code)]
 pub fn SaveSettings() {
     send_cmd("SaveSettings", "SaveSettings() failed");
 }
 
 /// Function to save the settings to disc
+#[allow(dead_code)]
 fn SaveSettings_(db: &Connection) {
     unsafe {
         let cmd = format!(
@@ -354,6 +385,7 @@ fn SaveSettings_(db: &Connection) {
 }
 
 /// Transfer settings from the dialog boxes in the preferences screen to the in memory settings database
+#[allow(dead_code)]
 pub fn ApplySettings(hwnd: HWND) {
     unsafe {
         SetIntSetting(IDC_PREFS_ON_CONFLICT, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
@@ -372,12 +404,14 @@ pub fn ApplySettings(hwnd: HWND) {
 }
 
 /// Counts the number of <what>s in a <table> which resides in our in memory database
+#[allow(dead_code)]
 pub fn Count(what: &str, table: &str) -> usize {
     let cmd = format!("Count={}={}", what, table);
     send_cmd(&cmd, "Count() failed").as_str().unwrap().parse::<usize>().unwrap()
 }
 
 /// Gets file masks/patterns from our in memory database
+#[allow(dead_code)]
 pub fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
     let cmd = format!("GetFilePatterns={}", idx);
     let answer = send_cmd(&cmd, "GetFilePatterns() failed");
@@ -388,6 +422,7 @@ pub fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
 }
 
 /// Gets file speccs from our in memory database
+#[allow(dead_code)]
 pub fn GetFileSpec(idx: usize, zSpec: &mut String) {
     let cmd = format!("GetFileSpec={}", idx);
     let answer = send_cmd(&cmd, "GetFileSpec() failed");
@@ -396,29 +431,46 @@ pub fn GetFileSpec(idx: usize, zSpec: &mut String) {
 }
 
 /// Deletes a file masks/patterns from our in memory database
+#[allow(dead_code)]
 pub fn DeleteFilePattern(zName: &mut String) {
     let cmd = format!("DeleteFilePattern={}", zName);
     send_cmd(&cmd, "DeleteFilePattern() failed");
 }
 
 /// Makes a temporary copy of the file pattern table in our in-memory database
+#[allow(dead_code)]
 pub fn MakeTempFilePatternDatabase() {
     send_cmd("MakeTempFilePatternDatabase", "MakeTempFilePatternDatabase() failed");
 }
 
 /// Restores the default file patterns
+#[allow(dead_code)]
 pub fn RestoreFilePatternDatabase() {
     send_cmd("RestoreFilePatternDatabase", "RestoreFilePatternDatabase() failed");
 }
 
 /// Gets file masks/patterns from our in memory database
+#[allow(dead_code)]
 pub fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
     let cmd = format!("AddFilePattern={}|+|{}|$|{}", idx, zName, zSpec);
     send_cmd(&cmd, "AddFilePattern() failed");
 }
 
 /// Runs a non-returning batch sql script
+#[allow(dead_code)]
 pub fn QuickNonReturningSqlCommand(sql: String) {
     let cmd = format!("QuickNonReturningSqlCommand={}", sql);
     send_cmd(&cmd, "QuickNonReturningSqlCommand() failed");
+}
+
+/// Sends BEGIN command
+#[allow(dead_code)]
+pub fn Begin() {
+    send_cmd("Begin", "Begin() failed");
+}
+
+/// Sends COMMIT command
+#[allow(dead_code)]
+pub fn Commit() {
+    send_cmd("Commit", "Commit() failed");
 }

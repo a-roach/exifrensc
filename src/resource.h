@@ -45,6 +45,7 @@
 #define IDC_PROGRESS                            25001
 #define IDB_SETTINGS                            32158
 #define IDC_ABOUT_DESCRIPTION                   40000
+#define IDC_THINKING_Cancel                     40000
 #define IDC_COPYRIGHT                           40001
 #define IDM_PrefsFileMaskDel                    40001
 #define IDC_ABOUT_ST_AUTHOR                     40002

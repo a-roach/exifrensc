@@ -18,6 +18,7 @@ use std::ptr::null;
 use std::sync::mpsc;
 use std::thread;
 use std::{env, mem, slice};
+use std::mem::size_of;
 use windows::core::*;
 use windows::Win32::UI::{
     Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
@@ -74,6 +75,7 @@ pub static mut MAIN_HWND: HWND = windows::Win32::Foundation::HWND(0);
 pub static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
 static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
 static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) };
+static mut WANT_TO_STOP_FILE_SCANNING: bool = false; // Siginal to threads running lengthy operations with the progress dialog to try and stop
 
 pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
@@ -364,7 +366,11 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let mut file_name_buffer = [0; MAX_PATH as usize];
                 let hDrop: HDROP = HDROP(transmute(wParam));
                 let nFiles: u32 = DragQueryFileA(hDrop, 0xFFFFFFFF, Some(file_name_buffer.as_mut_slice())); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
-thinking.launch( nFiles as isize ,PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
+                if nFiles > 1 {
+                    thinking.launch(nFiles as isize, PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
+                } else {
+                    thinking.launch(BAR_MARQUEE, PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
+                }
 
                 /*
                  * We will just run a "protection" flag over any current files which are in our database
@@ -386,8 +392,11 @@ thinking.launch( nFiles as isize ,PCWSTR(utf8_to_utf16("Scanning files\0").as_pt
                         WalkDirectoryAndAddFiles(&test_Path);
                     } else {
                         CheckAndAddThisFile(file_path);
+                        if WANT_TO_STOP_FILE_SCANNING {
+                            break;
+                        }
+                        thinking.step(1);
                     }
-                    thinking.step(1);
                 }
 
                 delete_unwanted_files_after_bulk_import();
@@ -531,8 +540,6 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     fileNames.push(utf8_to_utf16(&Name));
                     fileSpecs.push(utf8_to_utf16(&Spec));
 
-                    let iColFmt: u32 = 0;
-                    let uColumns: i32 = 0;
                     let mut lv = LVITEMW {
                         mask: LVIF_TEXT,
                         iItem: i.try_into().unwrap(),
@@ -546,8 +553,8 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                         iIndent: 0,
                         iGroupId: LVITEMA_GROUP_ID(0),
                         cColumns: 0,
-                        puColumns: transmute(&uColumns),
-                        piColFmt: transmute(&iColFmt),
+                        puColumns: std::ptr::null_mut(),
+                        piColFmt: std::ptr::null_mut(),
                         iGroup: 0,
                     };
 
@@ -621,7 +628,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                         let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
                         if SendMessageA(dlgFileMask, LVM_GETSELECTEDCOUNT, WPARAM(0), LPARAM(0)) != LRESULT(0) {
                             let selected = SendMessageA(dlgFileMask, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
-                            let mut name_buffer = [0; 128_usize];
+                            let name_buffer = [0; 128_usize];
                             let lv = LVITEMW {
                                 mask: LVIF_TEXT,
                                 iItem: 0,
@@ -682,7 +689,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                         // Change a few of the default options for the dialog
                         file_dialog.SetTitle(w!("Path to ExifTool.exe")).expect("SetTitle() failed");
                         file_dialog.SetOkButtonLabel(w!("Set")).expect("SetOkButtonLabel() failed");
-                        let mut file_pat: [COMDLG_FILTERSPEC; 1] = [COMDLG_FILTERSPEC {
+                        let file_pat: [COMDLG_FILTERSPEC; 1] = [COMDLG_FILTERSPEC {
                             pszName: w!("ExifTool"),
                             pszSpec: w!("ExifTool.exe"),
                         }];
@@ -774,8 +781,6 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
                     // Insert the new values into the listview in the settings window
                     let dlgFileMask: HWND = GetDlgItem(settings_hwnd, IDC_PREFS_FILE_MASK);
-                    let iColFmt: u32 = 0;
-                    let uColumns: i32 = 0;
                     let mut lv = LVITEMW {
                         mask: LVIF_TEXT,
                         iItem: selected_.0.try_into().unwrap(),
@@ -789,8 +794,8 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                         iIndent: 0,
                         iGroupId: LVITEMA_GROUP_ID(0),
                         cColumns: 0,
-                        puColumns: transmute(&uColumns),
-                        piColFmt: transmute(&iColFmt),
+                        puColumns: std::ptr::null_mut(),
+                        piColFmt: std::ptr::null_mut(),
                         iGroup: 0,
                     };
 
@@ -905,7 +910,6 @@ pub const BAR_MARQUEE: isize = 0;
 
 /// Progress bar functions to show we are doing things
 impl Thinking {
- 
     /// Launches a progress bar.
     /// If nCount = 0, or BAR_MARQUEE, then the bar is launched as a marquee bar with an indeterminate range.
     /// If nCount >0, then the bar is launched as a range bar with the maximum range set to nCount.
@@ -931,6 +935,10 @@ impl Thinking {
                     }
                 }
             });
+
+            unsafe {
+                WANT_TO_STOP_FILE_SCANNING = false;
+            }
 
             self.thread_id = thread_id_rx.recv().unwrap();
             self.hwnd = hwnd_rx.recv().unwrap();
@@ -1007,18 +1015,14 @@ impl Thinking {
     }
 }
 
+/// Callback function for processing the thinking/progress bar
 extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     unsafe {
         match nMsg {
             WM_INITDIALOG => {
                 /*
-                               If we wanted to modify the style of the progress bar, we might do this:
-
-                               let current_style: u32 = GetWindowLongPtrA(GetDlgItem(hwnd, IDC_PROGRESS), GWL_STYLE).try_into().unwrap();
-                               SetWindowLongPtrA(GetDlgItem(hwnd, IDC_PROGRESS), GWL_STYLE, (current_style | PBS_MARQUEE).try_into().unwrap());
-                                 CONTROL         "", IDC_PROGRESS, PROGRESS_CLASS, PBS_MARQUEE, 8, 14, 171, 11, WS_EX_LEFT
-
-                */
+                 * Choose, and set up for either a range bar or a marquee
+                 */
                 if lParam == LPARAM(0) {
                     SendDlgItemMessageA(hwnd, IDC_PROGRESS, PBM_SETMARQUEE, WPARAM(1), LPARAM(0));
                 } else {
@@ -1037,6 +1041,8 @@ extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                 if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL || MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
                     EndDialog(hwnd, 0);
+                } else if wParam == IDC_THINKING_Cancel as u64 {
+                    WANT_TO_STOP_FILE_SCANNING = true;
                 }
                 1
             }
@@ -1251,10 +1257,8 @@ fn LoadPictureFiles() {
         let x: u32 = GetIntSetting(IDC_PREFS_DRAG_N_DROP).try_into().unwrap();
         file_dialog.SetFileTypeIndex(x + 1).unwrap();
 
-        /* Don't know why this does not work! 😪
-        let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, KF_FLAG_DEFAULT.0.try_into().unwrap(), None).unwrap();
-                file_dialog.SetDefaultFolder(&defPath);
-         */
+        let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, 0, None).expect("Could not find Pictures");
+        file_dialog.SetFolder(&defPath).unwrap(); // SetDefaultFolder
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 |= FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options).expect("SetOptions() failed in LoadFile()");
@@ -1358,7 +1362,8 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let mut nksc_name = String::new();
             let (stdout_transmitter, rx) = mpsc::channel();
             let stderr_transmitter = stdout_transmitter.clone();
-            let tmpbuf: [u8; 8] = [0; 8]; // ChildStdin is private internally so for now we'll reserve a block of memory for it 🙄
+            const sizeof_ChildStdin: usize =size_of::<std::process::ChildStdin>();
+            let tmpbuf: [u8; sizeof_ChildStdin] = [0; sizeof_ChildStdin]; // ChildStdin is private internally so for now we'll reserve a block of memory for it 🙄
             let mut exiftool_stdin: std::process::ChildStdin = transmute(tmpbuf.as_ptr());
             let engine = GetIntSetting(IDC_PREFS_EXIF_Engine);
 
@@ -1503,7 +1508,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
              * sidecar file, then add them to our in memory database.
              */
             let paths = fs::read_dir(WhichDirectory).expect("Could not count the files in the directory 😥.");
-            let file_count=paths.count();
+            let file_count = paths.count();
             thinking.make_range(file_count as isize);
             let paths = fs::read_dir(WhichDirectory).expect("Could not scan the directory 😥.");
 
@@ -1570,11 +1575,14 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                             let cmd = format!("UPDATE exif SET path='{}' WHERE path='file_path';", file_path.path().as_os_str().to_string_lossy());
                             QuickNonReturningSqlCommand(cmd);
                         } else {
-                            let mut warn = &format!("Well, that,\"{}\", was not expected!🤔\0", received);
-                            MessageBoxW(None, PCWSTR(transmute(&utf8_to_utf16(warn))), w!("Warning!"), MB_OK | MB_ICONINFORMATION);
+                            let warn = &format!("Well, that,\"{}\", was not expected!🤔\0", received);
+                            MessageBoxW(None, PCWSTR(&utf8_to_utf16(warn) as *const Vec<u16> as *const u16), w!("Warning!"), MB_OK | MB_ICONINFORMATION);
                         }
                     }
                     thinking.step(1);
+                    if WANT_TO_STOP_FILE_SCANNING {
+                        break;
+                    }
                 } else {
                     /* Directory, at this stage no plans to add recursion, but this is where we would put it. For now,
                      * we will just use it to potentially parse and/or find the nikon params directory
