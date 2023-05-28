@@ -79,7 +79,6 @@ pub const HOST: &str = "127.0.0.1:18792";
 pub const HOST_URL: &str = "http://127.0.0.1:18792";
 pub const KAMADAK_EXIF: usize = 1;
 pub const EXIFTOOL: usize = 0;
-pub const BAR_MARQUEE: isize = 0;
 
 // Some definitions seemingly missing, as of coding, from the windows crate
 pub const NM_CLICK: u32 = 4294967195;
@@ -365,6 +364,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 let mut file_name_buffer = [0; MAX_PATH as usize];
                 let hDrop: HDROP = HDROP(transmute(wParam));
                 let nFiles: u32 = DragQueryFileA(hDrop, 0xFFFFFFFF, Some(file_name_buffer.as_mut_slice())); // Wish I could send a NULL as the last param since I don't really need to pass a buffer for this call
+thinking.launch( nFiles as isize ,PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
 
                 /*
                  * We will just run a "protection" flag over any current files which are in our database
@@ -372,7 +372,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                  * into the database which are not images.
                  */
 
-                QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
+                QuickNonReturningSqlCommand("BEGIN;UPDATE files SET tmp_lock=1;COMMIT;BEGIN;".to_string());
 
                 for i in 0..nFiles
                 // Walk through the dropped "files" one by one, but they may not all be files, some may be directories 😛
@@ -387,9 +387,12 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     } else {
                         CheckAndAddThisFile(file_path);
                     }
+                    thinking.step(1);
                 }
 
                 delete_unwanted_files_after_bulk_import();
+                QuickNonReturningSqlCommand("COMMIT;".to_string());
+                thinking.kill();
                 DragFinish(hDrop);
                 0
             }
@@ -898,6 +901,8 @@ struct Thinking {
     hwnd: HWND,
 }
 
+pub const BAR_MARQUEE: isize = 0;
+
 /// Progress bar functions to show we are doing things
 impl Thinking {
  
@@ -968,7 +973,7 @@ impl Thinking {
             let mut current_style: isize = GetWindowLongPtrA(GetDlgItem(self.hwnd, IDC_PROGRESS), GWL_STYLE);
             current_style ^= PBS_MARQUEE as isize;
             let range: isize = nCount << 16;
-
+            SetWindowLongPtrA(GetDlgItem(self.hwnd, IDC_PROGRESS), GWL_STYLE, (current_style));
             SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETSTEP, WPARAM(1), LPARAM(0));
             SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETRANGE, WPARAM(0), LPARAM(range));
             BringWindowToTop(self.hwnd);
@@ -981,7 +986,7 @@ impl Thinking {
     #[allow(dead_code)]
     fn step(&mut self, n: isize) {
         unsafe {
-            if n > 0 {
+            if n != 1 {
                 let current_position = SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_GETPOS, WPARAM(0), LPARAM(0));
                 let new_position = current_position.0 + n;
                 SendDlgItemMessageA(self.hwnd, IDC_PROGRESS, PBM_SETPOS, WPARAM(new_position.try_into().unwrap()), LPARAM(0));
@@ -1312,9 +1317,10 @@ fn LoadDirectoryOfPictures() {
         if let Ok(_v) = answer {
             let selected_directories = file_dialog.GetResult().unwrap(); // IShellItem with the result. We know we have a result because we have got this far.
             let directory_name = selected_directories.GetDisplayName(SIGDN_FILESYSPATH).unwrap(); // Pointer to a utf16 buffer with the file name
-            QuickNonReturningSqlCommand("UPDATE files SET tmp_lock=1;".to_string());
+            QuickNonReturningSqlCommand("BEGIN;UPDATE files SET tmp_lock=1;COMMIT;BEGIN;".to_string());
             WalkDirectoryAndAddFiles(&PathBuf::from(directory_name.to_string().unwrap()));
             delete_unwanted_files_after_bulk_import();
+            QuickNonReturningSqlCommand("COMMIT;".to_string());
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
 
@@ -1342,8 +1348,9 @@ fn get_nksc_file_path(file_to_check: &PathBuf) -> String {
 /// so it can map out where the corrosponding entry is; then it looks for the files; finally it fetches the exif tags for the files
 fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
     unsafe {
+        thinking.launch(BAR_MARQUEE, PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
         if WhichDirectory.is_dir()
-        // sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
+        // Sanity check, probably not necessary, but this is Rust and Rust is all about "safety"
         {
             let nksc_param_path = WhichDirectory.clone().join("NKSC_PARAM");
             let mut nksc_param_paths = HashMap::new();
@@ -1495,8 +1502,11 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
              * Now we will look for the files in the directory we just dropped, check to see if there is an associated
              * sidecar file, then add them to our in memory database.
              */
+            let paths = fs::read_dir(WhichDirectory).expect("Could not count the files in the directory 😥.");
+            let file_count=paths.count();
+            thinking.make_range(file_count as isize);
             let paths = fs::read_dir(WhichDirectory).expect("Could not scan the directory 😥.");
-            //        let file_count=paths.count();
+
             for each_path in paths {
                 let file_path = each_path.unwrap();
 
@@ -1564,6 +1574,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                             MessageBoxW(None, PCWSTR(transmute(&utf8_to_utf16(warn))), w!("Warning!"), MB_OK | MB_ICONINFORMATION);
                         }
                     }
+                    thinking.step(1);
                 } else {
                     /* Directory, at this stage no plans to add recursion, but this is where we would put it. For now,
                      * we will just use it to potentially parse and/or find the nikon params directory
@@ -1580,6 +1591,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let mut warn = format!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
             MessageBoxA(None, PCSTR(warn.as_mut_ptr()), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
         }
+        thinking.kill();
     }
 }
 
