@@ -17,6 +17,10 @@ fn main() {
     let seconds = diff.num_seconds() - (days * 86400);
     let minutes = (diff.num_seconds() - (days * 86400)) / 60;
     let iso_8601 = now.format("%Y%m%D");
+    let iso_8601_build_stamp = format!("pub const ISO_8601_BUILD_STAMP: &str=\"{}\\0\";\n",now.format("%Y-%m-%d %H:%M"));
+    let vers = format!("pub const PROGRAM_VERSION: &str=\"{}.{}.{}.{}\\0\";\n", majorversion, minorversion, days, minutes);
+    let copyright: String = now.format("pub const PROGRAM_COPYRIGHT: &str=\"2022-%Y\\0\";\n").to_string();
+
 
     /*
      * Update the manifest.xml file with the current build version
@@ -125,6 +129,12 @@ pub struct ControlStuff
 
 "#,
     );
+
+    out_body.push_str(&iso_8601_build_stamp);
+    out_body.push_str(&vers);
+    out_body.push_str(&copyright);
+    out_body.push_str("\n\n");
+
 
     let mut body = String::new();
     let mut fr = File::open("src/exifrensc_res.rc").expect("Could not open exifrensc_res.rc");
@@ -296,6 +306,7 @@ pub struct ControlStuff
     for (identifier, val) in defines.iter() {
         out_body.push_str(&format!("pub const {}: i32 = {};\n", identifier, val));
     }
+
 
     /*
      * Save the "include" file to disk

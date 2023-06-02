@@ -11,14 +11,16 @@ use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
+use std::mem::size_of;
 use std::os::raw::c_void;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::ptr::null;
 use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Mutex;
 use std::thread;
 use std::{env, mem, slice};
-use std::mem::size_of;
 use windows::core::*;
 use windows::Win32::UI::{
     Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
@@ -72,13 +74,11 @@ macro_rules! FailU {
 // Global Variables
 pub static mut path_to_settings_sqlite: String = String::new();
 pub static mut MAIN_HWND: HWND = windows::Win32::Foundation::HWND(0);
-pub static mut BONAFIDE: String = String::new(); // Used for verifying that the internal web server got a bonafide response from within the program
 static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
-static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) };
+static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) }; // Structure which pins our progress bars down
 static mut WANT_TO_STOP_FILE_SCANNING: bool = false; // Siginal to threads running lengthy operations with the progress dialog to try and stop
+static mut RESULT_SENDER: Option<Mutex<Sender<DBcommand>>> = None; // A channel used by our database server to take requests
 
-pub const HOST: &str = "127.0.0.1:18792";
-pub const HOST_URL: &str = "http://127.0.0.1:18792";
 pub const KAMADAK_EXIF: usize = 1;
 pub const EXIFTOOL: usize = 0;
 
@@ -166,10 +166,21 @@ fn main() -> Result<()> {
             MAIN_HWND = CreateDialogParamA(hinst, PCSTR(IDD_MAIN as *mut u8), HWND(0), Some(main_dlg_proc), LPARAM(0));
             let mut message = MSG::default();
 
+            /*
+             * Setup and launch our database server in a separate thread
+             * We are not ever going to kill this thread, we will let it run in the background until the program terminates,
+             * so there is no reason to grab its thread Id or anything like that.
+             */
+            let (tx, rx) = mpsc::channel();
+            RESULT_SENDER = Some(Mutex::new(tx));
+
             let _db_thread = thread::spawn(|| {
-                mem_db();
+                mem_db(rx);
             });
 
+            /*
+             * Our windows message loop
+             */
             while GetMessageA(&mut message, HWND(0), 0, 0).into() {
                 if (IsDialogMessageA(MAIN_HWND, &message) == false) {
                     TranslateMessage(&message);
@@ -278,7 +289,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             LoadDirectoryOfPictures();
                         }
                         IDC_MAIN_SAVE => {
-                            send_cmd("Quit", "Quit failed"); // Just for testing
+                            send_cmd("Quit"); // Just for testing
                         }
                         IDC_MAIN_DELETE => {
                             thinking.make_marquee();
@@ -362,6 +373,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 0
             }
 
+            // Strangely, WM_DROPFILES does not work when this program is run from an console!🤔
             WM_DROPFILES => {
                 let mut file_name_buffer = [0; MAX_PATH as usize];
                 let hDrop: HDROP = HDROP(transmute(wParam));
@@ -834,17 +846,6 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
             WM_INITDIALOG => {
                 set_icon(hwnd);
 
-                let annaversionary = chrono::Local.ymd(2022, 6, 17).and_hms(0, 0, 0);
-                let majorversion = env!("CARGO_PKG_VERSION_MAJOR");
-                let minorversion = env!("CARGO_PKG_VERSION_MINOR");
-                let now = Local::now();
-                let diff = now.signed_duration_since(annaversionary);
-                let days = diff.num_days();
-                let minutes = (diff.num_seconds() - (days * 86400)) / 60;
-                let iso_8601 = now.format("%Y-%m-%d %H:%M\0").to_string();
-                let vers = format!("{}.{}.{}.{}\0", majorversion, minorversion, days, minutes);
-                let copyright: String = now.format("2022-%Y\0").to_string();
-
                 segoe_bold_9.register_font(hwnd, s!("Segoe UI"), 9, FW_BOLD.0, false);
                 segoe_bold_9.set_font(IDC_ABOUT_ST_VER);
                 segoe_bold_9.set_font(IDC_ABOUT_BUILT);
@@ -857,9 +858,9 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 segoe_italic_10.register_font(hwnd, s!("Segoe UI"), 10, FW_NORMAL.0, true);
                 segoe_italic_10.set_font(IDC_ABOUT_DESCRIPTION);
 
-                SetDlgItemTextA(hwnd, IDC_ABOUT_VERSION, PCSTR(vers.as_ptr()));
-                SetDlgItemTextA(hwnd, IDC_ABOUT_BUILDDATE, PCSTR(iso_8601.as_ptr()));
-                SetDlgItemTextA(hwnd, IDC_COPYRIGHT, PCSTR(copyright.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_ABOUT_VERSION, PCSTR(PROGRAM_VERSION.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_ABOUT_BUILDDATE, PCSTR(ISO_8601_BUILD_STAMP.as_ptr()));
+                SetDlgItemTextA(hwnd, IDC_COPYRIGHT, PCSTR(PROGRAM_COPYRIGHT.as_ptr()));
 
                 0
             }
@@ -1362,7 +1363,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let mut nksc_name = String::new();
             let (stdout_transmitter, rx) = mpsc::channel();
             let stderr_transmitter = stdout_transmitter.clone();
-            const sizeof_ChildStdin: usize =size_of::<std::process::ChildStdin>();
+            const sizeof_ChildStdin: usize = size_of::<std::process::ChildStdin>();
             let tmpbuf: [u8; sizeof_ChildStdin] = [0; sizeof_ChildStdin]; // ChildStdin is private internally so for now we'll reserve a block of memory for it 🙄
             let mut exiftool_stdin: std::process::ChildStdin = transmute(tmpbuf.as_ptr());
             let engine = GetIntSetting(IDC_PREFS_EXIF_Engine);
