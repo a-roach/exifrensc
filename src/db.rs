@@ -43,6 +43,7 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                CREATE TABLE files (
                     path TEXT NOT NULL UNIQUE, /* Full path to image file */
                     created DATETIME, /* The time file file was created in seconds since Unix epoc */ 
+                    modified DATETIME, /* The time file file was modified in seconds since Unix epoc */ 
                     orig_file_name TEXT, 
                     new_file_name TEXT,
                     nksc_path TEXT, /* Path to the Nikon sidecar file */

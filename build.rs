@@ -10,7 +10,7 @@ fn main() {
     let majorversion = env!("CARGO_PKG_VERSION_MAJOR");
     let minorversion = env!("CARGO_PKG_VERSION_MINOR");
     let anniversary = env!("CARGO_PKG_VERSION_PATCH");
-    let annaversionary = chrono::Local.ymd(anniversary[0..4].parse::<i32>().unwrap(), anniversary[4..6].parse::<u32>().unwrap(), anniversary[6..8].parse::<u32>().unwrap()).and_hms(0, 0, 0);
+    let annaversionary = chrono::Local.with_ymd_and_hms(anniversary[0..4].parse::<i32>().unwrap(), anniversary[4..6].parse::<u32>().unwrap(), anniversary[6..8].parse::<u32>().unwrap(),0,0,0).unwrap();
     let now = Local::now();
     let diff = now.signed_duration_since(annaversionary);
     let days = diff.num_days();

@@ -35,7 +35,7 @@ use windows::Win32::{
 };
 // use windows::Win32::UI::Shell::SHCreateItemInKnownFolder;
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
-use chrono::{prelude::Local, DateTime, TimeZone};
+use chrono::{prelude::Local, DateTime};
 use db::*;
 use exif::In;
 
@@ -78,7 +78,7 @@ static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
 static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) }; // Structure which pins our progress bars down
 static mut WANT_TO_STOP_FILE_SCANNING: bool = false; // Siginal to threads running lengthy operations with the progress dialog to try and stop
 static mut RESULT_SENDER: Option<Mutex<Sender<DBcommand>>> = None; // A channel used by our database server to take requests
-pub static mut NX_Studio: NxStudioDB = NxStudioDB { location: String::new(), success: false };
+pub static mut NX_Studio: NxStudioDB = NxStudioDB { location: String::new(), success: false }; // Path to NX Studio
 
 pub const KAMADAK_EXIF: usize = 1;
 pub const EXIFTOOL: usize = 0;
@@ -102,15 +102,6 @@ pub const ID_CANCEL: i32 = 2; // This define just makes life easier, because IDC
 fn main() -> Result<()> {
     println!("cargo:rustc-env=VERSION_STRING={}", env!("CARGO_PKG_VERSION"));
     unsafe { MAIN_THREAD_ID = GetCurrentThreadId() };
-    /*
-        let path_to_FileData_db=find_nx_studio_FileData_db();
-
-        let nk_FileData_db = Connection::open(path_to_FileData_db.0).expect("Failed to load FileData.db database");
-        if (path_to_FileData_db.1 == true)
-        {
-            println!("yersy");
-        }
-    */
 
     /*
      * Check to see if we have a directory set up in LOCALAPPDATA.
@@ -412,6 +403,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 delete_unwanted_files_after_bulk_import();
                 Commit();
                 check_if_in_NXstudio();
+                fill_in_missing_DateTimeOriginal();
 
                 thinking.kill();
                 DragFinish(hDrop);
@@ -482,9 +474,9 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 SendMessageA(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
 
                 let dlgIDC_PREFS_DATE_SHOOT_PRIMARY: HWND = GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY);
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the date shot in the EXIF data\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("DateTimeOriginal in the EXIF data\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"File Created\" date\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"Last Modified\" date\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
 
                 SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
@@ -1300,6 +1292,7 @@ fn LoadPictureFiles() {
                 CoTaskMemFree(Some(transmute(file_name.0))); // feel rather nervy about this - not sure this is trying to free the right thing
             }
             check_if_in_NXstudio();
+            fill_in_missing_DateTimeOriginal();
         }
 
         //file_dialog.Release();
@@ -1328,6 +1321,7 @@ fn LoadDirectoryOfPictures() {
             delete_unwanted_files_after_bulk_import();
             Commit();
             check_if_in_NXstudio();
+            fill_in_missing_DateTimeOriginal();
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
 
@@ -1519,7 +1513,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                 let file_path = each_path.unwrap();
 
                 if (file_path.path().is_file()) {
-                    let created_datetime = get_file_created_timestamp_as_iso8601(&file_path.path());
+                    let created_mod_datetime = get_file_created_timestamp_as_iso8601(&file_path.path());
 
                     /*
                      * Get the file name and path as a string from the PathBuf
@@ -1533,13 +1527,16 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                     match nksc_param_paths.get_key_value(&file_name) {
                         Some(file_path) => {
                             let cmd = format!(
-                                "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
-                                this_file_path, created_datetime, file_name, file_path.1
+                                "INSERT OR IGNORE INTO files (path,created,modified,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}','{}');",
+                                this_file_path, created_mod_datetime.0, created_mod_datetime.1, file_name, file_path.1
                             );
                             QuickNonReturningSqlCommand(cmd);
                         }
                         _ => {
-                            let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", this_file_path, created_datetime, file_name);
+                            let cmd = format!(
+                                "INSERT OR IGNORE INTO files (path,created,modified,orig_file_name) VALUES('{}','{}','{}','{}');",
+                                this_file_path, created_mod_datetime.0, created_mod_datetime.1, file_name
+                            );
                             QuickNonReturningSqlCommand(cmd);
                         }
                     }
@@ -1602,6 +1599,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
             let mut warn = format!("Something went gravely wrong: {:?}", WhichDirectory.file_name());
             MessageBoxA(None, PCSTR(warn.as_mut_ptr()), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
         }
+
         thinking.kill();
     }
 }
@@ -1611,7 +1609,7 @@ fn CheckAndAddThisFile(file_path: String) {
     let test_Path = PathBuf::from(&file_path);
     if test_Path.is_file() {
         let nksc_path = get_nksc_file_path(&test_Path);
-        let created_datetime = get_file_created_timestamp_as_iso8601(&test_Path);
+        let created_mod_datetime = get_file_created_timestamp_as_iso8601(&test_Path);
         let orig_file_name = test_Path.file_name().unwrap().to_os_string().into_string().unwrap();
 
         /*
@@ -1768,12 +1766,15 @@ fn CheckAndAddThisFile(file_path: String) {
 
         if !nksc_path.is_empty() {
             let cmd = format!(
-                "INSERT OR IGNORE INTO files (path,created,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}');",
-                file_path, created_datetime, orig_file_name, nksc_path
+                "INSERT OR IGNORE INTO files (path,created,modified,orig_file_name,nksc_path) VALUES('{}','{}','{}','{}','{}');",
+                file_path, created_mod_datetime.0, created_mod_datetime.1, orig_file_name, nksc_path
             );
             QuickNonReturningSqlCommand(cmd);
         } else {
-            let cmd = format!("INSERT OR IGNORE INTO files (path,created,orig_file_name) VALUES('{}','{}','{}');", file_path, created_datetime, orig_file_name);
+            let cmd = format!(
+                "INSERT OR IGNORE INTO files (path,created,modified,orig_file_name) VALUES('{}','{}','{}','{}');",
+                file_path, created_mod_datetime.0, created_mod_datetime.1, orig_file_name
+            );
             QuickNonReturningSqlCommand(cmd);
         }
     }
@@ -1799,14 +1800,25 @@ fn delete_unwanted_files_after_bulk_import() {
 }
 
 /// Gets the file created time stamp from a given file in iso8601 format
-fn get_file_created_timestamp_as_iso8601(file_path: &PathBuf) -> String {
+fn get_file_created_timestamp_as_iso8601(file_path: &PathBuf) -> (String, String) {
+    let mut created: String = String::new();
+    let mut modified: String = String::new();
+
     let metadata = fs::metadata(file_path.as_path()).unwrap();
     if let Ok(created_time) = metadata.created() {
         let timestamp: DateTime<Local> = (created_time).into();
-        format!("{}", timestamp.format("%+"))
+        created = format!("{}", timestamp.format("%Y-%m-%d %H:%M:%S%:z")); // was %+
     } else {
-        "".to_string()
+        created = "".to_string();
     }
+
+    if let Ok(modified_time) = metadata.modified() {
+        let timestamp: DateTime<Local> = (modified_time).into();
+        modified = format!("{}", timestamp.format("%Y-%m-%d %H:%M:%S%:z"));
+    } else {
+        modified = "".to_string();
+    }
+    (created, modified)
 }
 
 /// Function to find out of there are any user settings for NX Studio
@@ -1879,9 +1891,9 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
     }
 }
 
-/// Checks to see if there is an entry in the Nx Studion database, and if there is, 
+/// Checks to see if there is an entry in the Nx Studion database, and if there is,
 /// and the user wants integration with Nx Studio, then adds the Nx Studio file_id for the file.
-// So nice NX Studio uses sqlite too! 
+// So nice NX Studio uses sqlite too!
 fn check_if_in_NXstudio() {
     unsafe {
         if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 {
@@ -1918,4 +1930,55 @@ fn check_if_in_NXstudio() {
             QuickNonReturningSqlCommand("DETACH DATABASE nxstudio;".to_string());
         }
     }
+}
+
+/// Create a synthetic DateTimeOriginal exif tag for files which are missing exif data.
+fn fill_in_missing_DateTimeOriginal() {
+    let mut cmd: String = String::new();
+    if GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY) == 0 {
+        cmd = r#"
+            INSERT INTO exif (path,tag,tag_id,value)
+            SELECT DISTINCT
+              files.path, 
+              'DateTimeOriginal',
+              36867,
+              created
+            FROM
+              files,
+              exif
+            WHERE
+              files.path=exif.path AND
+              files.path NOT IN (
+                SELECT path
+                FROM 
+                  exif
+                WHERE 
+                  tag='DateTimeOriginal'
+              );"#
+        .to_owned();
+    } else {
+        cmd = r#"
+            INSERT INTO exif (path,tag,tag_id,value)
+            SELECT DISTINCT
+              files.path, 
+              'DateTimeOriginal',
+              36867,
+              modified
+            FROM
+              files,
+              exif
+            WHERE
+              files.path=exif.path AND
+              files.path NOT IN (
+                SELECT path
+                FROM 
+                  exif
+                WHERE 
+                  tag='DateTimeOriginal'
+              );"#
+        .to_owned();
+    }
+    Begin();
+    QuickNonReturningSqlCommand(cmd);
+    Commit();
 }

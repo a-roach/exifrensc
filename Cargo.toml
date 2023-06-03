@@ -1,6 +1,6 @@
 [package]
 name = "exifrensc"
-version = "0.4.20221006"
+version = "0.5.20230603"
 authors = ["Andrew Roach <afr69email-Github@yahoo.com>"]
 edition = "2021"
 description = "Program to rename image files using EXIF data and to also synch that with nikon side car files."
