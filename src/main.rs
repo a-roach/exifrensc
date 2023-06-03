@@ -78,6 +78,7 @@ static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
 static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) }; // Structure which pins our progress bars down
 static mut WANT_TO_STOP_FILE_SCANNING: bool = false; // Siginal to threads running lengthy operations with the progress dialog to try and stop
 static mut RESULT_SENDER: Option<Mutex<Sender<DBcommand>>> = None; // A channel used by our database server to take requests
+pub static mut NX_Studio: NxStudioDB = NxStudioDB { location: String::new(), success: false };
 
 pub const KAMADAK_EXIF: usize = 1;
 pub const EXIFTOOL: usize = 0;
@@ -111,13 +112,6 @@ fn main() -> Result<()> {
         }
     */
 
-    let mut test_studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
-
-    if test_studio.existant() {
-    } else {
-        println!("No");
-    }
-
     /*
      * Check to see if we have a directory set up in LOCALAPPDATA.
      * If we don't have it yet, then we will try to create it.
@@ -140,6 +134,10 @@ fn main() -> Result<()> {
             Fail!("Could not find and/or create \"$LOCALAPPDATA\\exifrensc\".");
             panic!("Still can not find $LOCALAPPDATA.");
         }
+    }
+
+    unsafe {
+        NX_Studio.existant();
     }
 
     /*
@@ -412,7 +410,9 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 }
 
                 delete_unwanted_files_after_bulk_import();
-                QuickNonReturningSqlCommand("COMMIT;".to_string());
+                Commit();
+                check_if_in_NXstudio();
+
                 thinking.kill();
                 DragFinish(hDrop);
                 0
@@ -588,7 +588,6 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                  * Check to see if NX Studio is installed, and if it is, see if we can find the database file
                  * If we can not then we will disable getting to choose to use it as an option.
                  */
-                let mut NX_Studio: NxStudioDB = NxStudioDB { location: PathBuf::new(), success: false };
 
                 let NX_stu_DlgItem: HWND = GetDlgItem(hwnd, IDC_PREFS_NX_STUDIO);
 
@@ -835,6 +834,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 /// Dialog callback for our about window
 ///
 /// Mostly this is just changing fonts
+/// We get our build data from resources_def.rs, which is regenerated each time we do a build.
 extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam: LPARAM) -> isize {
     // Have to be global because we need to destroy our font resources eventually
     static mut segoe_bold_9: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) };
@@ -1299,6 +1299,7 @@ fn LoadPictureFiles() {
 
                 CoTaskMemFree(Some(transmute(file_name.0))); // feel rather nervy about this - not sure this is trying to free the right thing
             }
+            check_if_in_NXstudio();
         }
 
         //file_dialog.Release();
@@ -1325,7 +1326,8 @@ fn LoadDirectoryOfPictures() {
             QuickNonReturningSqlCommand("BEGIN;UPDATE files SET tmp_lock=1;COMMIT;BEGIN;".to_string());
             WalkDirectoryAndAddFiles(&PathBuf::from(directory_name.to_string().unwrap()));
             delete_unwanted_files_after_bulk_import();
-            QuickNonReturningSqlCommand("COMMIT;".to_string());
+            Commit();
+            check_if_in_NXstudio();
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
 
@@ -1825,8 +1827,8 @@ fn find_nx_studio_FileData_db() -> (PathBuf, bool) {
     (test_Path, success)
 }
 
-struct NxStudioDB {
-    location: PathBuf,
+pub struct NxStudioDB {
+    location: String,
     success: bool,
 }
 
@@ -1834,17 +1836,18 @@ struct NxStudioDB {
 impl NxStudioDB {
     /// Check to see if FileData.db exists, if it does, set its location and return true, if it doesn't return false
     fn existant(&mut self) -> (bool) {
-        if self.location.as_os_str() == "" {
+        if self.location.is_empty() {
             let mut localappdata = env::var("LOCALAPPDATA").expect("$LOCALAPPDATA is not set.");
             localappdata.push_str("\\Nikon\\NX Studio\\DB\\FileData.db");
 
-            self.location = PathBuf::from(&localappdata);
+            let test_path = PathBuf::from(&localappdata);
 
             /*
              * See if the file exists, if it does, change success to true
              */
-            if self.location.exists() {
+            if test_path.exists() {
                 self.success = true;
+                self.location = test_path.to_string_lossy().to_string();
             } else {
                 self.success = false;
             }
@@ -1872,6 +1875,47 @@ fn ResourceSave(id: i32, section: &str, filename: &str) {
                 drop(output);
             }
             Err(e) => println!("Error {}", e),
+        }
+    }
+}
+
+/// Checks to see if there is an entry in the Nx Studion database, and if there is, 
+/// and the user wants integration with Nx Studio, then adds the Nx Studio file_id for the file.
+// So nice NX Studio uses sqlite too! 
+fn check_if_in_NXstudio() {
+    unsafe {
+        if GetIntSetting(IDC_PREFS_NX_STUDIO) == 1 {
+            let cmd = format!(
+                r#"
+        ATTACH DATABASE '{}' AS nxstudio;
+
+        UPDATE files set inNXstudio = (
+            SELECT
+              file_id
+            FROM
+              nxstudio.file,
+              nxstudio.folder
+            WHERE
+              file.parent_id = folder.folder_id AND
+              nxstudio.folder.path||nxstudio.file.name=files.path
+          )
+        
+         WHERE files.path in  (
+            SELECT
+              path||name as full_path
+            FROM
+              nxstudio.file,
+              nxstudio.folder
+            WHERE
+              file.parent_id = folder.folder_id
+         );"#,
+                NX_Studio.location
+            );
+
+            Begin();
+            QuickNonReturningSqlCommand(cmd);
+            Commit();
+            QuickNonReturningSqlCommand("DETACH DATABASE nxstudio;".to_string());
         }
     }
 }
