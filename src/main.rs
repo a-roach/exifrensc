@@ -71,14 +71,27 @@ macro_rules! FailU {
     };
 }
 
+macro_rules! Commit {
+    () => {
+        send_cmd("Commit");
+    };
+}
+
+macro_rules! Begin {
+    () => {
+        send_cmd("Begin");
+    };
+}
+
 // Global Variables
 pub static mut path_to_settings_sqlite: String = String::new();
+pub static mut NX_Studio: NxStudioDB = NxStudioDB { location: String::new(), success: false }; // Path to NX Studio
 pub static mut MAIN_HWND: HWND = windows::Win32::Foundation::HWND(0);
 static mut MAIN_THREAD_ID: u32 = 0; // The thread ID of our main process
 static mut thinking: Thinking = Thinking { thread_id: 0, hwnd: HWND(0) }; // Structure which pins our progress bars down
 static mut WANT_TO_STOP_FILE_SCANNING: bool = false; // Siginal to threads running lengthy operations with the progress dialog to try and stop
 static mut RESULT_SENDER: Option<Mutex<Sender<DBcommand>>> = None; // A channel used by our database server to take requests
-pub static mut NX_Studio: NxStudioDB = NxStudioDB { location: String::new(), success: false }; // Path to NX Studio
+pub static mut MAIN_LISTVIEW_RESULTS: Vec<(String, String, usize)> = Vec::new(); // Results passed from our database thread to UI thread
 
 pub const KAMADAK_EXIF: usize = 1;
 pub const EXIFTOOL: usize = 0;
@@ -227,15 +240,15 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     hwnd,
                     IDC_MAIN_FILE_LIST,
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
-                    WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
-                    LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER).try_into().unwrap()),
+                    WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER).try_into().unwrap()),
+                    LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER).try_into().unwrap()),
                 );
 
                 let mut lvC = LVCOLUMNA {
                     mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
                     fmt: LVCFMT_LEFT,
-                    cx: convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.width / 4),
-                    pszText: transmute(utf8_to_utf16("Original File Name\0").as_ptr()),
+                    cx: convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.width) - convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.width / 4) - 52,
+                    pszText: transmute(w!("Original File Name").as_ptr()),
                     cchTextMax: 0,
                     iSubItem: 0,
                     iImage: 0,
@@ -247,19 +260,17 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
 
                 SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
+                lvC.cx = convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.width / 4);
                 lvC.iSubItem = 1;
-                lvC.pszText = transmute(utf8_to_utf16("Changed File Name\0").as_ptr());
+                lvC.pszText = transmute(w!("Rename to").as_ptr());
                 SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
 
-                lvC.pszText = transmute(utf8_to_utf16("File Created Time\0").as_ptr());
+                lvC.iSubItem = 2;
+                lvC.cx = 52;
+                lvC.pszText = transmute(w!("Locked").as_ptr());
                 SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(2), LPARAM(&lvC as *const _ as isize));
 
-                lvC.pszText = transmute(utf8_to_utf16("Photo Taken Time\0").as_ptr());
-                SendDlgItemMessageW(hwnd, IDC_MAIN_FILE_LIST, LVM_INSERTCOLUMN, WPARAM(3), LPARAM(&lvC as *const _ as isize));
-
-                SendDlgItemMessageA(hwnd, IDC_MAIN_PATTERN, EM_SETLIMITTEXT, WPARAM(32), LPARAM(0));
-
-                0
+                1
             }
 
             WM_COMMAND => {
@@ -278,13 +289,12 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             LoadDirectoryOfPictures();
                         }
                         IDC_MAIN_SAVE => {
-                            send_cmd("Quit"); // Just for testing
+                            transfer_data_to_main_file_list();
                         }
                         IDC_MAIN_DELETE => {
                             thinking.make_marquee();
                         }
                         IDC_MAIN_ERASE => {
-                            //     thinking.launch(100, PCWSTR(utf8_to_utf16("Scanning files\0").as_ptr()));
                             thinking.launch(100, PCWSTR(null()));
                         }
                         IDC_MAIN_SYNC => {
@@ -300,8 +310,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                         _ => {}
                     }
                 }
-
-                0
+                1
             }
 
             WM_SIZE => {
@@ -334,8 +343,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     HWND_TOP,
                     convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.x),
                     convert_y_to_client_coords(IDC_MAIN_FILE_LIST_R.y),
-                    new_width - convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.x + 8),
-                    new_height - convert_y_to_client_coords(IDC_MAIN_FILE_LIST_R.y + 8),
+                    new_width - convert_x_to_client_coords(IDC_MAIN_FILE_LIST_R.x + 7),
+                    new_height - convert_y_to_client_coords(IDC_MAIN_FILE_LIST_R.y + 7),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
 
@@ -358,8 +367,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     convert_y_to_client_coords(IDC_MAIN_SYNC_R.height),
                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                 );
-
-                0
+                1
             }
 
             // Strangely, WM_DROPFILES does not work when this program is run from an console!🤔
@@ -401,18 +409,19 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 }
 
                 delete_unwanted_files_after_bulk_import();
-                Commit();
+                Commit!();
                 check_if_in_NXstudio();
                 fill_in_missing_DateTimeOriginal();
+                transfer_data_to_main_file_list();
 
                 thinking.kill();
                 DragFinish(hDrop);
-                0
+                1
             }
 
             WM_DESTROY => {
                 PostQuitMessage(0);
-                0
+                1
             }
             _ => 0,
         }
@@ -591,7 +600,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 } else {
                     SendMessageA(NX_stu_DlgItem, BM_SETCHECK, WPARAM(BST_UNCHECKED.0.try_into().unwrap()), LPARAM(0));
                 }
-                0
+                1
             }
 
             WM_COMMAND => {
@@ -711,11 +720,11 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     }
                     _ => {}
                 }
-                0
+                1
             }
             /*             WM_CONTEXTMENU =>{
                            println!("WM_CONTEXTMENU");
-                           0
+                           1
                        }
             */
             WM_NOTIFY => {
@@ -736,12 +745,12 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                     GetCursorPos(&mut xy);
                     TrackPopupMenu(myPopup, TPM_TOPALIGN | TPM_LEFTALIGN, xy.x, xy.y, 0, hwnd, None);
                 }
-                0
+                1
             }
 
             WM_DESTROY => {
                 EndDialog(hwnd, 0);
-                0
+                1
             }
             _ => 0,
         }
@@ -760,7 +769,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                 SendDlgItemMessageA(hwnd, IDC_AddFileMaskFileMask, EM_SETLIMITTEXT, WPARAM(32), LPARAM(0));
                 selected_ = lParam;
 
-                0
+                1
             }
 
             WM_COMMAND => {
@@ -811,7 +820,7 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
                     EndDialog(hwnd, 0);
                 }
-                0
+                1
             }
 
             WM_DESTROY => {
@@ -854,7 +863,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 SetDlgItemTextA(hwnd, IDC_ABOUT_BUILDDATE, PCSTR(ISO_8601_BUILD_STAMP.as_ptr()));
                 SetDlgItemTextA(hwnd, IDC_COPYRIGHT, PCSTR(PROGRAM_COPYRIGHT.as_ptr()));
 
-                0
+                1
             }
 
             WM_COMMAND => {
@@ -867,7 +876,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                     segoe_italic_10.destroy();
                     EndDialog(hwnd, 0);
                 }
-                0
+                1
             }
 
             WM_DESTROY => {
@@ -875,7 +884,7 @@ extern "system" fn about_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, _lParam
                 segoe_bold_italic_13.destroy();
                 segoe_italic_10.destroy();
                 EndDialog(hwnd, 0);
-                0
+                1
             }
             _ => 0,
         }
@@ -1293,6 +1302,7 @@ fn LoadPictureFiles() {
             }
             check_if_in_NXstudio();
             fill_in_missing_DateTimeOriginal();
+            transfer_data_to_main_file_list();
         }
 
         //file_dialog.Release();
@@ -1319,9 +1329,10 @@ fn LoadDirectoryOfPictures() {
             QuickNonReturningSqlCommand("BEGIN;UPDATE files SET tmp_lock=1;COMMIT;BEGIN;".to_string());
             WalkDirectoryAndAddFiles(&PathBuf::from(directory_name.to_string().unwrap()));
             delete_unwanted_files_after_bulk_import();
-            Commit();
+            Commit!();
             check_if_in_NXstudio();
             fill_in_missing_DateTimeOriginal();
+            transfer_data_to_main_file_list();
             CoTaskMemFree(Some(transmute(directory_name.0)));
         }
 
@@ -1513,7 +1524,7 @@ fn WalkDirectoryAndAddFiles(WhichDirectory: &PathBuf) {
                 let file_path = each_path.unwrap();
 
                 if (file_path.path().is_file()) {
-                    let created_mod_datetime = get_file_created_timestamp_as_iso8601(&file_path.path());
+                    let created_mod_datetime = get_file_created_modified_timestamp_as_iso8601(&file_path.path());
 
                     /*
                      * Get the file name and path as a string from the PathBuf
@@ -1609,7 +1620,7 @@ fn CheckAndAddThisFile(file_path: String) {
     let test_Path = PathBuf::from(&file_path);
     if test_Path.is_file() {
         let nksc_path = get_nksc_file_path(&test_Path);
-        let created_mod_datetime = get_file_created_timestamp_as_iso8601(&test_Path);
+        let created_mod_datetime = get_file_created_modified_timestamp_as_iso8601(&test_Path);
         let orig_file_name = test_Path.file_name().unwrap().to_os_string().into_string().unwrap();
 
         /*
@@ -1799,8 +1810,8 @@ fn delete_unwanted_files_after_bulk_import() {
     QuickNonReturningSqlCommand(cmd);
 }
 
-/// Gets the file created time stamp from a given file in iso8601 format
-fn get_file_created_timestamp_as_iso8601(file_path: &PathBuf) -> (String, String) {
+/// Gets the file created  and modified time stamps from a given file in iso8601 format
+fn get_file_created_modified_timestamp_as_iso8601(file_path: &PathBuf) -> (String, String) {
     let mut created: String = String::new();
     let mut modified: String = String::new();
 
@@ -1924,9 +1935,9 @@ fn check_if_in_NXstudio() {
                 NX_Studio.location
             );
 
-            Begin();
+            Begin!();
             QuickNonReturningSqlCommand(cmd);
-            Commit();
+            Commit!();
             QuickNonReturningSqlCommand("DETACH DATABASE nxstudio;".to_string());
         }
     }
@@ -1978,7 +1989,54 @@ fn fill_in_missing_DateTimeOriginal() {
               );"#
         .to_owned();
     }
-    Begin();
+    Begin!();
     QuickNonReturningSqlCommand(cmd);
-    Commit();
+    Commit!();
+}
+
+/// Transfers data from our database to our listview
+fn transfer_data_to_main_file_list() {
+    unsafe {
+        send_cmd("transfer_data_to_main_file_list");
+
+        SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0));
+
+        for (i, item) in MAIN_LISTVIEW_RESULTS.iter().enumerate() {
+            let file_path = utf8_to_utf16(&item.0);
+            let file_rename = utf8_to_utf16(&item.1);
+
+            let mut lv = LVITEMA {
+                mask: LVIF_TEXT,
+                iItem: 8192,
+                iSubItem: 0,
+                state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                pszText: transmute(file_path.as_ptr()),
+                cchTextMax: 0,
+                iImage: 0,
+                lParam: LPARAM(0),
+                iIndent: 0,
+                iGroupId: LVITEMA_GROUP_ID(0),
+                cColumns: 0,
+                puColumns: std::ptr::null_mut(),
+                piColFmt: std::ptr::null_mut(),
+                iGroup: 0,
+            };
+
+            SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_INSERTITEM, WPARAM(0), LPARAM(&lv as *const _ as isize));
+            lv.pszText = transmute(file_rename.as_ptr());
+            lv.iSubItem = 1;
+            SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
+            if item.2 == 0 {
+                lv.pszText = transmute(w!("🔓").as_ptr());
+                lv.iSubItem = 2;
+                SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
+            } else {
+                lv.pszText = transmute(w!("🔒").as_ptr());
+                lv.iSubItem = 2;
+                SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
+            }
+        }
+        MAIN_LISTVIEW_RESULTS.clear();
+    }
 }

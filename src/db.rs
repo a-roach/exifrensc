@@ -70,7 +70,7 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
          */
         loop {
             let asked = rx.recv().unwrap(); // This will wait infinitely for a command
-            let mut my_response: String = String::new();
+            let mut my_response: String = "".to_string();
             //println!("{}",command.cmd);
 
             /*
@@ -90,7 +90,6 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 let id = asked.cmd.get(14..value_delimeter).unwrap();
                 let cmd = format!("UPDATE settings SET value={} WHERE id={};", value, id);
                 db.execute(&cmd, []).expect("SetIntSetting() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("GetTextSetting") {
                 let cmd = format!("SELECT value FROM settings where ID={}", asked.cmd.get(14..).expect("Extracting ID failed."));
@@ -103,15 +102,12 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 let id = asked.cmd.get(15..value_delimeter).unwrap();
                 let cmd = format!("UPDATE settings SET value='{}' WHERE id={};", value, id);
                 db.execute(&cmd, []).expect("SetTextSetting() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("SaveSettings") {
                 SaveSettings_(&db);
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("ReloadSettings") {
                 ReloadSettings_(&db);
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("Count") {
                 let table_delimeter = asked.cmd.rfind('=').unwrap();
@@ -134,12 +130,10 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 let pszName = asked.cmd.get(18..).unwrap();
                 let cmd = format!("DELETE FROM file_pat WHERE pszName='{}';", pszName);
                 db.execute(&cmd, []).expect("DeleteFilePattern() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("MakeTempFilePatternDatabase") {
                 let cmd = "DROP TABLE IF EXISTS tmp_file_pat; CREATE TABLE tmp_file_pat AS SELECT * FROM file_pat;".to_string();
                 db.execute_batch(&cmd).expect("MakeTempFilePatternDatabase() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("RestoreFilePatternDatabase") {
                 let cmd = r#"DROP TABLE IF EXISTS file_pat;
@@ -153,7 +147,6 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                                       DROP TABLE IF EXISTS tmp_file_pat"#
                     .to_string();
                 db.execute_batch(&cmd).expect("RestoreFilePatternDatabase() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("AddFilePattern") {
                 let idx_delimeter = asked.cmd.find('=').unwrap();
@@ -183,12 +176,10 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                     zSpec = zSpec
                 );
                 db.execute_batch(&cmd).expect("AddFilePattern() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("QuickNonReturningSqlCommand") {
                 let cmd = asked.cmd.get(28..asked.cmd.len() - 1).unwrap();
                 db.execute_batch(cmd).expect("QuickNonReturningSqlCommand() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("GetFileSpec") {
                 let idx = asked.cmd.get(12..).unwrap();
@@ -212,11 +203,38 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 //
             } else if asked.cmd.starts_with("Begin") {
                 db.execute("BEGIN;", []).expect("Begin() failed.");
-                my_response = "".to_string();
                 //
             } else if asked.cmd.starts_with("Commit") {
                 db.execute("COMMIT;", []).expect("Commit() failed.");
-                my_response = "".to_string();
+                //
+            } else if asked.cmd.starts_with("transfer_data_to_main_file_list") {
+                let mut stmt = db
+                    .prepare(
+                        r#"
+                SELECT 
+                  path,
+                  ifnull(orig_file_name,new_file_name) new_file_name,
+                  locked
+                FROM
+                  files;                     "#,
+                    )
+                    .expect("Prepare statement on transfer_data_to_main_file_list failed.");
+
+                unsafe {
+                    let mut rows = stmt.query([]);
+                    loop {
+                        let mut row = rows.as_mut().expect("row in rows failed").next();
+                        if row.as_mut().unwrap().is_none() {
+                            break;
+                        }
+                        let mut file_path: String = row.as_mut().unwrap().unwrap().get(0).expect("No results?");
+                        file_path.push('\0');
+                        let mut file_rename: String = row.as_mut().unwrap().unwrap().get(1).expect("No results?");
+                        file_rename.push('\0');
+                        let lock_file: usize = row.unwrap().unwrap().get(2).expect("No results?");
+                        MAIN_LISTVIEW_RESULTS.push((file_path, file_rename, lock_file));
+                    }
+                }
                 //
             } else if asked.cmd.starts_with("Quit") {
                 unsafe {
@@ -389,14 +407,4 @@ pub fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
 pub fn QuickNonReturningSqlCommand(sql: String) {
     let cmd = format!("QuickNonReturningSqlCommand={}", sql);
     send_cmd(&cmd);
-}
-
-/// Sends BEGIN command
-pub fn Begin() {
-    send_cmd("Begin");
-}
-
-/// Sends COMMIT command
-pub fn Commit() {
-    send_cmd("Commit");
 }
