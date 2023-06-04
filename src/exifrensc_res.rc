@@ -19,6 +19,23 @@ IDB_SETTINGS       SQLITE         ".\\settings.sqlite"
 // Menu resources
 //
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
+IDR_MAIN_FILE_LIST MENU
+{
+    POPUP "Root"
+    {
+        MENUITEM "Add picture(s)", IDM_ADD_PICTURE
+        MENUITEM "Add folder of pictures", IDM_ADD_FOLDER_OF_PICTURES
+        MENUITEM "Remove from list", IDM_REMOVE_FROM_LIST
+        MENUITEM "Clear list", IDM_CLEAR_LIST
+        MENUITEM "Manually rename", IDM_MANUALLY_RENAME
+        MENUITEM "Lock from bulk name changes", IDM_LOCK
+        MENUITEM "EXIF browser", IDM_EXIF_BROWSER
+    }
+}
+
+
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
 IDR_PrefsFileMask MENU
 {
     POPUP "Root"
@@ -66,6 +83,19 @@ FONT 9, "Segoe UI"
     PUSHBUTTON      "Cancel", IDCANCEL, 221, 42, 50, 14, 0, WS_EX_LEFT
     GROUPBOX        "Pattern description", IDC_STATIC, 7, 7, 130, 30, 0, WS_EX_LEFT
     GROUPBOX        "File pattern/mask", IDC_STATIC, 141, 7, 130, 30, 0, WS_EX_LEFT
+}
+
+
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_AUS
+IDD_EXIF_Browser DIALOG 0, 0, 280, 280
+STYLE DS_3DLOOK | DS_CENTER | DS_SETFONT | WS_CAPTION | WS_VISIBLE | WS_TABSTOP | WS_POPUP | WS_THICKFRAME | WS_SYSMENU
+EXSTYLE WS_EX_WINDOWEDGE
+CAPTION "EXIF Browser"
+FONT 9, "Segoe UI"
+{
+    CONTROL         "", IDC_EXIF_BROWSER_List, WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_ALIGNLEFT | LVS_REPORT, 7, 7, 266, 247, WS_EX_LEFT
+    PUSHBUTTON      "Cancel", IDC_EXIF_Browse_Cancel, 224, 259, 50, 14, 0, WS_EX_LEFT
 }
 
 

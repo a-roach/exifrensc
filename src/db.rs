@@ -236,6 +236,29 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                     }
                 }
                 //
+            } else if asked.cmd.starts_with("transfer_data_to_exif_browser_list") {
+                let path_to_match = asked.cmd.get(34..).unwrap();
+                let cmd=format!("SELECT tag, value FROM exif WHERE path='{path_to_match}';");
+
+                let mut stmt = db
+                    .prepare(&cmd)
+                    .expect("Prepare statement on transfer_data_to_exif_browser_list failed.");
+
+                unsafe {
+                    let mut rows = stmt.query([]);
+                    loop {
+                        let mut row = rows.as_mut().expect("row in rows failed").next();
+                        if row.as_mut().unwrap().is_none() {
+                            break;
+                        }
+                        let mut exif_tag: String = row.as_mut().unwrap().unwrap().get(0).expect("No results?");
+                        exif_tag.push('\0');
+                        let mut exif_value: String = row.as_mut().unwrap().unwrap().get(1).expect("No results?");
+                        exif_value.push('\0');
+                        MAIN_LISTVIEW_RESULTS.push((exif_tag, exif_value, 0));
+                    }
+                }
+                
             } else if asked.cmd.starts_with("Quit") {
                 unsafe {
                     PostThreadMessageA(MAIN_THREAD_ID, WM_QUIT, WPARAM(2), LPARAM(0));
@@ -407,4 +430,10 @@ pub fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
 pub fn QuickNonReturningSqlCommand(sql: String) {
     let cmd = format!("QuickNonReturningSqlCommand={}", sql);
     send_cmd(&cmd);
+}
+
+/// Deletes a single entry, and any associated exif tags, from our database
+pub fn DeleteFromDatabase(filename: String){
+    let cmd: String=format!("DELETE FROM exif WHERE path='{filename}';DELETE FROM files WHERE path='{filename}';");
+    QuickNonReturningSqlCommand(cmd);
 }

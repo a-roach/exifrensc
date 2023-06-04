@@ -194,6 +194,54 @@ fn main() -> Result<()> {
     }
 }
 
+macro_rules! GetSelectedPath {
+    () => {{
+        let dlgFileList: HWND = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
+        let n = SendMessageA(dlgFileList, LVM_GETSELECTEDCOUNT, WPARAM(0), LPARAM(0));
+        let mut name: String=String::new();
+        if n.0 > 0 {
+        let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+
+        let name_buffer = [0; 256_usize];
+        let lv = LVITEMW {
+            mask: LVIF_TEXT,
+            iItem: 0,
+            iSubItem: 0,
+            state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+            stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+            pszText: transmute(name_buffer.as_ptr()),
+            cchTextMax: 256,
+            iImage: 0,
+            lParam: LPARAM(0),
+            iIndent: 0,
+            iGroupId: LVITEMA_GROUP_ID(0),
+            cColumns: 0,
+            puColumns: std::ptr::null_mut(),
+            piColFmt: std::ptr::null_mut(),
+            iGroup: 0,
+        };
+
+        SendMessageA(dlgFileList, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+
+        let mut utf7_buffer: [u8; 256] = [0; 256_usize];
+        let mut i = 0;
+        let mut j = 0;
+
+        /*
+         * Convert to ASCII/UTF7 (kind of 🙄)
+         */
+        while name_buffer[i] != 0 {
+            utf7_buffer[j] = name_buffer[i];
+            i += 2;
+            j += 1;
+        }
+        name = String::from_utf8_unchecked(utf7_buffer.to_vec());
+        name.truncate(name.find('\0').unwrap());
+    }
+        name
+    }};
+}
+
 /// Dialog callback function for our main window
 extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
     static mut segoe_mdl2_assets: WindowsControlText = WindowsControlText { hwnd: HWND(0), hfont: HFONT(0) }; // Has to be global because we need to destroy our font resource eventually
@@ -282,23 +330,44 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     PostQuitMessage(0);
                 } else {
                     match wParam as i32 {
-                        IDC_MAIN_ADD_PICTURE => {
+                        IDC_MAIN_ADD_PICTURE | IDM_ADD_PICTURE => {
                             LoadPictureFiles();
                         }
-                        IDC_MAIN_ADD_FOLDER => {
+                        IDC_MAIN_ADD_FOLDER | IDM_ADD_FOLDER_OF_PICTURES => {
                             LoadDirectoryOfPictures();
                         }
                         IDC_MAIN_SAVE => {
                             transfer_data_to_main_file_list();
                         }
-                        IDC_MAIN_DELETE => {
-                            thinking.make_marquee();
+                        IDC_MAIN_DELETE | IDM_CLEAR_LIST => {
+                            let n=SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_GETITEMCOUNT, WPARAM(0), LPARAM(0));
+                            if n.0 > 0 && MessageBoxA(None, s!("Are you sure you want to clear the list?"), s!("Clear list"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
+                                QuickNonReturningSqlCommand("DELETE FROM exif;DELETE FROM files;".to_owned());
+                                SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0));
+                            }
                         }
-                        IDC_MAIN_ERASE => {
-                            thinking.launch(100, PCWSTR(null()));
+                        IDC_MAIN_ERASE | IDM_REMOVE_FROM_LIST => {
+                            let filepath=GetSelectedPath!();
+                                DeleteFromDatabase(filepath);
+                                let dlgFileList=GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
+                                let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));                                
+                                SendMessageA(dlgFileList, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
                         }
                         IDC_MAIN_SYNC => {
                             thinking.kill();
+                        }
+                        IDC_MAIN_RENAME | IDM_MANUALLY_RENAME => {
+
+                        }
+                        IDM_LOCK => {
+
+                        }
+                        IDM_EXIF_BROWSER => {
+                            let filepath=GetSelectedPath!();
+                            if !filepath.is_empty() {
+                            let exif_hwnd: HWND=CreateDialogParamA(hinst, PCSTR(IDD_EXIF_Browser as *mut u8), HWND(0), Some(exif_browse_dlg_proc), LPARAM(0));
+                            transfer_data_to_exif_browser_list(exif_hwnd,&filepath);
+                            }
                         }
                         IDC_MAIN_SETTINGS => {
                             DialogBoxParamA(hinst, PCSTR(IDD_SETTINGS as *mut u8), HWND(0), Some(settings_dlg_proc), LPARAM(0));
@@ -419,6 +488,21 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 1
             }
 
+            WM_NOTIFY => {
+                if (lParamTOnmhdr(transmute(lParam)).0 == IDC_MAIN_FILE_LIST) && (lParamTOnmhdr(transmute(lParam)).1 == NM_RCLICK) {
+                    /*
+                     * Setup our right-click context menu
+                     */
+
+                    let mut xy = POINT { x: 0, y: 0 };
+                    let rootmenu: HMENU = LoadMenuW(hinst, PCWSTR(IDR_MAIN_FILE_LIST as *mut u16)).unwrap();
+                    let myPopup: HMENU = GetSubMenu(rootmenu, 0);
+                    GetCursorPos(&mut xy);
+                    TrackPopupMenu(myPopup, TPM_TOPALIGN | TPM_LEFTALIGN, xy.x, xy.y, 0, hwnd, None);
+                }
+                1
+            }
+
             WM_DESTROY => {
                 PostQuitMessage(0);
                 1
@@ -464,7 +548,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 segoe_mdl2_assets.set_text(
                     IDC_PREFS_EXIF_Engine,
                     w!(""),
-                    w!("ExifTool requires an external program, is a little bit slower, but decodes tags more throughly.\rKamadak is internal, a bit faster, but not as comprehensive."),
+                    w!("ExifTool requires an external program, is a little bit slower, but decodes tags more throughly.\r\rKamadak is internal, a bit faster, but not as comprehensive."),
                 );
 
                 let dlgIDC_PREFS_ON_CONFLICT_ADD: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD);
@@ -494,7 +578,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                 /*
                  * Setup up the file mask box, which is a listview
-                 * Kind of in parrallel we will also set up the drag and drop filter box at the same time
+                 * Kind of in parallel we will also set up the drag and drop filter box at the same time
                  */
                 let dlgFileMask: HWND = GetDlgItem(hwnd, IDC_PREFS_FILE_MASK);
                 let dlgIDC_IDC_PREFS_DRAG_N_DROP: HWND = GetDlgItem(hwnd, IDC_PREFS_DRAG_N_DROP);
@@ -1063,6 +1147,100 @@ extern "system" fn thinking_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
     }
 }
 
+/// Dialog callback function for our EXIF browsing window
+extern "system" fn exif_browse_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    unsafe {
+        match nMsg {
+            WM_INITDIALOG => {
+                set_icon(hwnd);
+
+                /*
+                 * Setup up our listview
+                 */
+
+                SendDlgItemMessageW(
+                    hwnd,
+                    IDC_EXIF_BROWSER_List,
+                    LVM_SETEXTENDEDLISTVIEWSTYLE,
+                    WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER).try_into().unwrap()),
+                    LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER).try_into().unwrap()),
+                );
+
+                let mut lvC = LVCOLUMNA {
+                    mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
+                    fmt: LVCFMT_LEFT,
+                    cx: convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width) - convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width / 2)-17,
+                    pszText: transmute(w!("EXIF Tag").as_ptr()),
+                    cchTextMax: 0,
+                    iSubItem: 0,
+                    iImage: 0,
+                    iOrder: 0,
+                    cxMin: 50,
+                    cxDefault: 55,
+                    cxIdeal: 55,
+                };
+
+                SendDlgItemMessageW(hwnd, IDC_EXIF_BROWSER_List, LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
+
+                lvC.cx = convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width / 2)-3;
+                lvC.iSubItem = 1;
+                lvC.pszText = transmute(w!("Value").as_ptr());
+                SendDlgItemMessageW(hwnd, IDC_EXIF_BROWSER_List, LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
+
+                1
+            }
+
+            WM_COMMAND => {
+                let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
+                wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
+
+                if wParam as i32 == IDC_EXIF_Browse_Cancel || wParam as i32 ==ID_CANCEL {
+                    EndDialog(hwnd,0);
+                }
+                1
+            }
+
+            WM_SIZE => {
+                let mut new_width: u64 = transmute(lParam);
+                new_width = (new_width << 48 >> 48); // LOWORD
+                let new_width: i32 = new_width.try_into().unwrap();
+                let mut new_height: u64 = transmute(lParam);
+                new_height = (new_height << 32 >> 48); // HIWORD
+                let new_height: i32 = new_height.try_into().unwrap();
+
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_EXIF_BROWSER_List_R.id) as HWND,
+                    HWND_TOP,
+                    convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.x),
+                    convert_y_to_client_coords(IDC_EXIF_BROWSER_List_R.y),
+                    new_width - convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.x + 7),
+                    new_height - convert_y_to_client_coords(IDC_EXIF_BROWSER_List_R.y + 26),
+                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_EXIF_Browse_Cancel_R.id) as HWND,
+                    HWND_TOP,
+                    new_width - convert_x_to_client_coords(57),
+                    new_height - convert_y_to_client_coords(21),
+                    convert_x_to_client_coords(IDC_EXIF_Browse_Cancel_R.width),
+                    convert_y_to_client_coords(IDC_EXIF_Browse_Cancel_R.height),
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+
+                1
+            }
+
+
+            WM_DESTROY => {
+                EndDialog(hwnd,0);
+                1
+            }
+            _ => 0,
+        }
+    }
+}
+
 /// Converts width to client width based on the Seogoe UI font's average size
 ///
 /// The values were hand computed and may not work for all monitors, but it works on all the ones I have to check.
@@ -1318,6 +1496,8 @@ fn LoadDirectoryOfPictures() {
         let file_dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).unwrap();
         file_dialog.SetTitle(w!("Choose Directories of Photos to Add")).expect("SetTitle() failed in LoadDirectory()");
         file_dialog.SetOkButtonLabel(w!("Select Directories")).expect("SetOkButtonLabel() failed in LoadDirectory()");
+        let defPath: IShellItem = SHCreateItemInKnownFolder(&FOLDERID_Pictures, 0, None).expect("Could not find Pictures");
+        file_dialog.SetFolder(&defPath).unwrap(); // SetDefaultFolder
         let mut options = file_dialog.GetOptions().unwrap();
         options.0 = options.0 | FOS_PICKFOLDERS.0 | FOS_ALLOWMULTISELECT.0;
         file_dialog.SetOptions(options).expect("SetOptions() failed in LoadDirectory()");
@@ -2036,6 +2216,45 @@ fn transfer_data_to_main_file_list() {
                 lv.iSubItem = 2;
                 SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
             }
+        }
+        MAIN_LISTVIEW_RESULTS.clear();
+    }
+}
+
+
+/// Transfers data from our database to our exif tag browser listview
+fn transfer_data_to_exif_browser_list(hwnd:HWND,filename: &str) {
+    unsafe {
+        send_cmd(&format!("transfer_data_to_exif_browser_list{filename}"));
+
+        SendDlgItemMessageA(hwnd, IDC_EXIF_BROWSER_List, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0));
+
+        for (i, item) in MAIN_LISTVIEW_RESULTS.iter().enumerate() {
+            let exif_tag = utf8_to_utf16(&item.0);
+            let exif_value = utf8_to_utf16(&item.1);
+
+            let mut lv = LVITEMA {
+                mask: LVIF_TEXT,
+                iItem: 8192,
+                iSubItem: 0,
+                state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                pszText: transmute(exif_tag.as_ptr()),
+                cchTextMax: 0,
+                iImage: 0,
+                lParam: LPARAM(0),
+                iIndent: 0,
+                iGroupId: LVITEMA_GROUP_ID(0),
+                cColumns: 0,
+                puColumns: std::ptr::null_mut(),
+                piColFmt: std::ptr::null_mut(),
+                iGroup: 0,
+            };
+
+            SendDlgItemMessageA(hwnd, IDC_EXIF_BROWSER_List, LVM_INSERTITEM, WPARAM(0), LPARAM(&lv as *const _ as isize));
+            lv.pszText = transmute(exif_value.as_ptr());
+            lv.iSubItem = 1;
+            SendDlgItemMessageA(hwnd, IDC_EXIF_BROWSER_List, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
         }
         MAIN_LISTVIEW_RESULTS.clear();
     }
