@@ -257,10 +257,15 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                     }
                 }
             } else if asked.cmd.starts_with("returnint") {
-                let cmd = asked.cmd.get(9..).unwrap();
-                let mut stmt = db.prepare(&cmd).unwrap();
+                let cmd = asked.cmd.get(10..).unwrap();
+                let mut stmt = db.prepare(cmd).unwrap();
                 let answer: u32 = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
                 my_response = format!("{}", answer);
+                //
+            } else if asked.cmd.starts_with("returntextfromsql=") {
+                let cmd = asked.cmd.get(18..).unwrap();
+                let mut stmt = db.prepare(cmd).unwrap();
+                my_response = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
                 //
             } else if asked.cmd.starts_with("Quit") {
                 unsafe {
@@ -445,6 +450,12 @@ pub fn DeleteFromDatabase(filename: String) {
 pub fn ToggleLock(filename: String) -> usize {
     let cmd: String = format!("UPDATE files SET locked=(CASE WHEN locked = 0 THEN 1 ELSE 0 END) WHERE path='{filename}';");
     QuickNonReturningSqlCommand(cmd);
-    let cmd: String = format!("returnintSELECT locked FROM files WHERE path='{filename}';");
+    let cmd: String = format!("returnint=SELECT locked FROM files WHERE path='{filename}';");
     send_cmd(&cmd).as_str().parse::<usize>().unwrap()
+}
+
+/// Gets the new file name for a given file
+pub fn Get_new_file_name(filepath: String) -> String {
+    let cmd: String = format!("returntextfromsql=SELECT ifnull(orig_file_name,new_file_name) new_file_name FROM files WHERE path='{filepath}';");
+    send_cmd(&cmd)
 }

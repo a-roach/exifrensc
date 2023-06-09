@@ -10,11 +10,14 @@
 #define IDD_ADD_FILE_MASK                       106
 #define IDR_MAIN_FILE_LIST                      109
 #define IDD_EXIF_Browser                        111
+#define IDD_MANUALLY_RENAME                     113
 #define IDC_MAIN_ADD_FOLDER                     20004
 #define IDC_MAIN_ADD_PICTURE                    20008
 #define IDC_MAIN_DELETE                         20016
 #define IDC_MAIN_ERASE                          20020
+#define IDC_MAIN_EXIF                           20023
 #define IDC_MAIN_FILE_LIST                      20024
+#define IDC_MAIN_LOCK                           20027
 #define IDC_MAIN_INFO                           20028
 #define IDC_MAIN_PATTERN                        20032
 #define IDC_MAIN_RENAME                         20036
@@ -52,6 +55,7 @@
 #define IDM_ADD_PICTURE                         40000
 #define IDC_COPYRIGHT                           40001
 #define IDC_EXIF_BROWSER_List                   40001
+#define IDC_MANUALLY_RENAME_Text                40001
 #define IDM_ADD_FOLDER_OF_PICTURES              40001
 #define IDM_PrefsFileMaskDel                    40001
 #define IDC_ABOUT_ST_AUTHOR                     40002

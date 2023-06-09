@@ -22,6 +22,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::{env, mem, slice};
 use windows::core::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::{
     Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
     Input::KeyboardAndMouse::EnableWindow,
@@ -262,6 +263,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 segoe_mdl2_assets.set_text(IDC_MAIN_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_LOCK, w!("\u{E72E}"), w!("Remove all photos from the list"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_EXIF, w!("\u{E8EC}"), w!("Remove all photos from the list"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_INFO, w!("\u{E946}"), w!("About"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_SETTINGS, w!("\u{F8B0}"), w!("Settings"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_SYNC, w!("\u{EDAB}"), w!("Resync names"));
@@ -369,8 +372,11 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                         IDC_MAIN_SYNC => {
                             thinking.kill();
                         }
-                        IDC_MAIN_RENAME | IDM_MANUALLY_RENAME => {}
-                        IDM_LOCK => {
+                        IDC_MAIN_RENAME | IDM_MANUALLY_RENAME => {
+                            let selected = SendMessageA(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+                            DialogBoxParamA(hinst, PCSTR(IDD_MANUALLY_RENAME as *mut u8), hwnd, Some(manual_rename_dlg_proc), LPARAM(selected.0));
+                        }
+                        IDM_LOCK | IDC_MAIN_LOCK => {
                             let filepath = GetSelectedPath!();
                             if !filepath.is_empty() {
                                 let state = ToggleLock(filepath);
@@ -383,7 +389,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                                 }
                                 lock_image.push('\0');
 
-                                let mut lv = LVITEMW {
+                                let lv = LVITEMW {
                                     mask: LVIF_TEXT,
                                     iItem: selected.0.try_into().unwrap(),
                                     iSubItem: 2,
@@ -404,7 +410,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                                 SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
                             }
                         }
-                        IDM_EXIF_BROWSER => {
+                        IDM_EXIF_BROWSER | IDC_MAIN_EXIF => {
                             let filepath = GetSelectedPath!();
                             if !filepath.is_empty() {
                                 let exif_hwnd: HWND = CreateDialogParamA(hinst, PCSTR(IDD_EXIF_Browser as *mut u8), HWND(0), Some(exif_browse_dlg_proc), LPARAM(0));
@@ -944,6 +950,75 @@ extern "system" fn add_file_mask_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
 
                     AddFilePattern(selected_.0.try_into().unwrap(), patDescription, fileMask);
 
+                    EndDialog(hwnd, 0);
+                }
+                1
+            }
+
+            WM_DESTROY => {
+                EndDialog(hwnd, 0);
+                0
+            }
+            _ => 0,
+        }
+    }
+}
+
+/// Dialog callback for our manual rename dialog
+//
+extern "system" fn manual_rename_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: LPARAM) -> isize {
+    static mut selected_: LPARAM = LPARAM(0);
+    unsafe {
+        match nMsg {
+            WM_INITDIALOG => {
+                set_icon(hwnd);
+                SendDlgItemMessageA(hwnd, IDC_MANUALLY_RENAME_Text, EM_SETLIMITTEXT, WPARAM(64), LPARAM(0));
+                SetFocus(GetDlgItem(hwnd, IDC_MANUALLY_RENAME_Text));
+                selected_ = lParam;
+                let path = GetSelectedPath!();
+                let mut new_file_name = Get_new_file_name(path);
+                new_file_name.push('\0');
+                SetDlgItemTextW(hwnd, IDC_MANUALLY_RENAME_Text, PCWSTR(utf8_to_utf16(&new_file_name).as_ptr()));
+                1
+            }
+
+            WM_COMMAND => {
+                let mut wParam: u64 = transmute(wParam);
+                wParam = (wParam << 48 >> 48); // LOWORD
+
+                if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDCANCEL {
+                    EndDialog(hwnd, 0);
+                    //
+                } else if MESSAGEBOX_RESULT(wParam.try_into().unwrap()) == IDOK {
+                    let mut text: [u16; 128] = [0; 128];
+                    let len = GetWindowTextW(GetDlgItem(hwnd, IDC_MANUALLY_RENAME_Text), &mut text);
+                    let mut new_file_name = String::from_utf16_lossy(&text[..len as usize]);
+
+                    let path = GetSelectedPath!();
+                    let cmd = format!("UPDATE files SET new_file_name='{new_file_name}' WHERE path='{path}';");
+                    QuickNonReturningSqlCommand(cmd);
+
+                    new_file_name.push('\0');
+
+                    let lv = LVITEMW {
+                        mask: LVIF_TEXT,
+                        iItem: selected_.0.try_into().unwrap(),
+                        iSubItem: 1,
+                        state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                        pszText: transmute(utf8_to_utf16(&new_file_name).as_ptr()),
+                        cchTextMax: 0,
+                        iImage: 0,
+                        lParam: LPARAM(0),
+                        iIndent: 0,
+                        iGroupId: LVITEMA_GROUP_ID(0),
+                        cColumns: 0,
+                        puColumns: std::ptr::null_mut(),
+                        piColFmt: std::ptr::null_mut(),
+                        iGroup: 0,
+                    };
+
+                    SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(selected_.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
                     EndDialog(hwnd, 0);
                 }
                 1
