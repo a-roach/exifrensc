@@ -238,11 +238,9 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 //
             } else if asked.cmd.starts_with("transfer_data_to_exif_browser_list") {
                 let path_to_match = asked.cmd.get(34..).unwrap();
-                let cmd=format!("SELECT tag, value FROM exif WHERE path='{path_to_match}';");
+                let cmd = format!("SELECT tag, value FROM exif WHERE path='{path_to_match}';");
 
-                let mut stmt = db
-                    .prepare(&cmd)
-                    .expect("Prepare statement on transfer_data_to_exif_browser_list failed.");
+                let mut stmt = db.prepare(&cmd).expect("Prepare statement on transfer_data_to_exif_browser_list failed.");
 
                 unsafe {
                     let mut rows = stmt.query([]);
@@ -258,7 +256,12 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                         MAIN_LISTVIEW_RESULTS.push((exif_tag, exif_value, 0));
                     }
                 }
-                
+            } else if asked.cmd.starts_with("returnint") {
+                let cmd = asked.cmd.get(9..).unwrap();
+                let mut stmt = db.prepare(&cmd).unwrap();
+                let answer: u32 = stmt.query_row([], |row| row.get(0) as Result<u32>).expect("No results?");
+                my_response = format!("{}", answer);
+                //
             } else if asked.cmd.starts_with("Quit") {
                 unsafe {
                     PostThreadMessageA(MAIN_THREAD_ID, WM_QUIT, WPARAM(2), LPARAM(0));
@@ -433,7 +436,15 @@ pub fn QuickNonReturningSqlCommand(sql: String) {
 }
 
 /// Deletes a single entry, and any associated exif tags, from our database
-pub fn DeleteFromDatabase(filename: String){
-    let cmd: String=format!("DELETE FROM exif WHERE path='{filename}';DELETE FROM files WHERE path='{filename}';");
+pub fn DeleteFromDatabase(filename: String) {
+    let cmd: String = format!("DELETE FROM exif WHERE path='{filename}';DELETE FROM files WHERE path='{filename}';");
     QuickNonReturningSqlCommand(cmd);
+}
+
+/// Togles the file lock and returns the updated value
+pub fn ToggleLock(filename: String) -> usize {
+    let cmd: String = format!("UPDATE files SET locked=(CASE WHEN locked = 0 THEN 1 ELSE 0 END) WHERE path='{filename}';");
+    QuickNonReturningSqlCommand(cmd);
+    let cmd: String = format!("returnintSELECT locked FROM files WHERE path='{filename}';");
+    send_cmd(&cmd).as_str().parse::<usize>().unwrap()
 }

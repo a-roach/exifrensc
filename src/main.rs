@@ -194,50 +194,53 @@ fn main() -> Result<()> {
     }
 }
 
+/// Macro which has some wordy and repaeted in-line code. Just here to make the code
+/// more readable. It will see if the user has selected something, and if so, will return
+/// the file path which we use as a unique key in our database.
 macro_rules! GetSelectedPath {
     () => {{
         let dlgFileList: HWND = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
         let n = SendMessageA(dlgFileList, LVM_GETSELECTEDCOUNT, WPARAM(0), LPARAM(0));
-        let mut name: String=String::new();
+        let mut name: String = String::new();
         if n.0 > 0 {
-        let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+            let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
 
-        let name_buffer = [0; 256_usize];
-        let lv = LVITEMW {
-            mask: LVIF_TEXT,
-            iItem: 0,
-            iSubItem: 0,
-            state: LIST_VIEW_ITEM_STATE_FLAGS(0),
-            stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
-            pszText: transmute(name_buffer.as_ptr()),
-            cchTextMax: 256,
-            iImage: 0,
-            lParam: LPARAM(0),
-            iIndent: 0,
-            iGroupId: LVITEMA_GROUP_ID(0),
-            cColumns: 0,
-            puColumns: std::ptr::null_mut(),
-            piColFmt: std::ptr::null_mut(),
-            iGroup: 0,
-        };
+            let name_buffer = [0; 256_usize];
+            let lv = LVITEMW {
+                mask: LVIF_TEXT,
+                iItem: 0,
+                iSubItem: 0,
+                state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                pszText: transmute(name_buffer.as_ptr()),
+                cchTextMax: 256,
+                iImage: 0,
+                lParam: LPARAM(0),
+                iIndent: 0,
+                iGroupId: LVITEMA_GROUP_ID(0),
+                cColumns: 0,
+                puColumns: std::ptr::null_mut(),
+                piColFmt: std::ptr::null_mut(),
+                iGroup: 0,
+            };
 
-        SendMessageA(dlgFileList, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+            SendMessageA(dlgFileList, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
 
-        let mut utf7_buffer: [u8; 256] = [0; 256_usize];
-        let mut i = 0;
-        let mut j = 0;
+            let mut utf7_buffer: [u8; 256] = [0; 256_usize];
+            let mut i = 0;
+            let mut j = 0;
 
-        /*
-         * Convert to ASCII/UTF7 (kind of 🙄)
-         */
-        while name_buffer[i] != 0 {
-            utf7_buffer[j] = name_buffer[i];
-            i += 2;
-            j += 1;
+            /*
+             * Convert to ASCII/UTF7 (kind of 🙄)
+             */
+            while name_buffer[i] != 0 {
+                utf7_buffer[j] = name_buffer[i];
+                i += 2;
+                j += 1;
+            }
+            name = String::from_utf8_unchecked(utf7_buffer.to_vec());
+            name.truncate(name.find('\0').unwrap());
         }
-        name = String::from_utf8_unchecked(utf7_buffer.to_vec());
-        name.truncate(name.find('\0').unwrap());
-    }
         name
     }};
 }
@@ -288,8 +291,16 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                     hwnd,
                     IDC_MAIN_FILE_LIST,
                     LVM_SETEXTENDEDLISTVIEWSTYLE,
-                    WPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER).try_into().unwrap()),
-                    LPARAM((LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER).try_into().unwrap()),
+                    WPARAM(
+                        (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER)
+                            .try_into()
+                            .unwrap(),
+                    ),
+                    LPARAM(
+                        (LVS_EX_TWOCLICKACTIVATE | LVS_EX_GRIDLINES | LVS_EX_HEADERDRAGDROP | LVS_EX_FULLROWSELECT | LVS_NOSORTHEADER | LVS_EX_DOUBLEBUFFER)
+                            .try_into()
+                            .unwrap(),
+                    ),
                 );
 
                 let mut lvC = LVCOLUMNA {
@@ -340,33 +351,64 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             transfer_data_to_main_file_list();
                         }
                         IDC_MAIN_DELETE | IDM_CLEAR_LIST => {
-                            let n=SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_GETITEMCOUNT, WPARAM(0), LPARAM(0));
+                            let n = SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_GETITEMCOUNT, WPARAM(0), LPARAM(0));
                             if n.0 > 0 && MessageBoxA(None, s!("Are you sure you want to clear the list?"), s!("Clear list"), MB_YESNO | MB_ICONEXCLAMATION) == IDYES {
                                 QuickNonReturningSqlCommand("DELETE FROM exif;DELETE FROM files;".to_owned());
                                 SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_DELETEALLITEMS, WPARAM(0), LPARAM(0));
                             }
                         }
                         IDC_MAIN_ERASE | IDM_REMOVE_FROM_LIST => {
-                            let filepath=GetSelectedPath!();
+                            let filepath = GetSelectedPath!();
+                            if !filepath.is_empty() {
                                 DeleteFromDatabase(filepath);
-                                let dlgFileList=GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
-                                let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));                                
+                                let dlgFileList = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
+                                let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
                                 SendMessageA(dlgFileList, LVM_DELETEITEM, WPARAM(selected.0.try_into().unwrap()), LPARAM(0));
+                            }
                         }
                         IDC_MAIN_SYNC => {
                             thinking.kill();
                         }
-                        IDC_MAIN_RENAME | IDM_MANUALLY_RENAME => {
-
-                        }
+                        IDC_MAIN_RENAME | IDM_MANUALLY_RENAME => {}
                         IDM_LOCK => {
+                            let filepath = GetSelectedPath!();
+                            if !filepath.is_empty() {
+                                let state = ToggleLock(filepath);
+                                let dlgFileList = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
+                                let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+                                let mut lock_image: String = "🔓".to_owned();
 
+                                if state == 1 {
+                                    lock_image = "🔒".to_owned();
+                                }
+                                lock_image.push('\0');
+
+                                let mut lv = LVITEMW {
+                                    mask: LVIF_TEXT,
+                                    iItem: selected.0.try_into().unwrap(),
+                                    iSubItem: 2,
+                                    state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                                    stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                                    pszText: transmute(utf8_to_utf16(&lock_image).as_ptr()),
+                                    cchTextMax: 0,
+                                    iImage: 0,
+                                    lParam: LPARAM(0),
+                                    iIndent: 0,
+                                    iGroupId: LVITEMA_GROUP_ID(0),
+                                    cColumns: 0,
+                                    puColumns: std::ptr::null_mut(),
+                                    piColFmt: std::ptr::null_mut(),
+                                    iGroup: 0,
+                                };
+
+                                SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+                            }
                         }
                         IDM_EXIF_BROWSER => {
-                            let filepath=GetSelectedPath!();
+                            let filepath = GetSelectedPath!();
                             if !filepath.is_empty() {
-                            let exif_hwnd: HWND=CreateDialogParamA(hinst, PCSTR(IDD_EXIF_Browser as *mut u8), HWND(0), Some(exif_browse_dlg_proc), LPARAM(0));
-                            transfer_data_to_exif_browser_list(exif_hwnd,&filepath);
+                                let exif_hwnd: HWND = CreateDialogParamA(hinst, PCSTR(IDD_EXIF_Browser as *mut u8), HWND(0), Some(exif_browse_dlg_proc), LPARAM(0));
+                                transfer_data_to_exif_browser_list(exif_hwnd, &filepath);
                             }
                         }
                         IDC_MAIN_SETTINGS => {
@@ -1169,7 +1211,7 @@ extern "system" fn exif_browse_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, l
                 let mut lvC = LVCOLUMNA {
                     mask: LVCF_FMT | LVCF_TEXT | LVCF_SUBITEM | LVCF_WIDTH,
                     fmt: LVCFMT_LEFT,
-                    cx: convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width) - convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width / 2)-17,
+                    cx: convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width) - convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width / 2) - 17,
                     pszText: transmute(w!("EXIF Tag").as_ptr()),
                     cchTextMax: 0,
                     iSubItem: 0,
@@ -1182,7 +1224,7 @@ extern "system" fn exif_browse_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, l
 
                 SendDlgItemMessageW(hwnd, IDC_EXIF_BROWSER_List, LVM_INSERTCOLUMN, WPARAM(0), LPARAM(&lvC as *const _ as isize));
 
-                lvC.cx = convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width / 2)-3;
+                lvC.cx = convert_x_to_client_coords(IDC_EXIF_BROWSER_List_R.width / 2) - 3;
                 lvC.iSubItem = 1;
                 lvC.pszText = transmute(w!("Value").as_ptr());
                 SendDlgItemMessageW(hwnd, IDC_EXIF_BROWSER_List, LVM_INSERTCOLUMN, WPARAM(1), LPARAM(&lvC as *const _ as isize));
@@ -1194,8 +1236,8 @@ extern "system" fn exif_browse_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, l
                 let mut wParam: u64 = transmute(wParam); // I am sure there has to be a better way to do this, but the only way I could get the value out of a WPARAM type was to transmute it to a u64
                 wParam = (wParam << 48 >> 48); // LOWORD isn't defined, at least as far as I could tell, so I had to improvise
 
-                if wParam as i32 == IDC_EXIF_Browse_Cancel || wParam as i32 ==ID_CANCEL {
-                    EndDialog(hwnd,0);
+                if wParam as i32 == IDC_EXIF_Browse_Cancel || wParam as i32 == ID_CANCEL {
+                    EndDialog(hwnd, 0);
                 }
                 1
             }
@@ -1231,9 +1273,8 @@ extern "system" fn exif_browse_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, l
                 1
             }
 
-
             WM_DESTROY => {
-                EndDialog(hwnd,0);
+                EndDialog(hwnd, 0);
                 1
             }
             _ => 0,
@@ -2221,9 +2262,8 @@ fn transfer_data_to_main_file_list() {
     }
 }
 
-
 /// Transfers data from our database to our exif tag browser listview
-fn transfer_data_to_exif_browser_list(hwnd:HWND,filename: &str) {
+fn transfer_data_to_exif_browser_list(hwnd: HWND, filename: &str) {
     unsafe {
         send_cmd(&format!("transfer_data_to_exif_browser_list{filename}"));
 

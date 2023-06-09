@@ -28,7 +28,7 @@ IDR_MAIN_FILE_LIST MENU
         MENUITEM "Remove from list", IDM_REMOVE_FROM_LIST
         MENUITEM "Clear list", IDM_CLEAR_LIST
         MENUITEM "Manually rename", IDM_MANUALLY_RENAME
-        MENUITEM "Lock from bulk name changes", IDM_LOCK
+        MENUITEM "Toggle ""Lock from bulk name changes""", IDM_LOCK
         MENUITEM "EXIF browser", IDM_EXIF_BROWSER
     }
 }
