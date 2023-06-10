@@ -370,7 +370,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             }
                         }
                         IDC_MAIN_SYNC => {
-                            thinking.kill();
+                            prerename_files();
+                            transfer_data_to_main_file_list();
                         }
                         IDC_MAIN_RENAME | IDM_MANUALLY_RENAME => {
                             let selected = SendMessageA(GetDlgItem(hwnd, IDC_MAIN_FILE_LIST), LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
@@ -380,34 +381,41 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             let filepath = GetSelectedPath!();
                             if !filepath.is_empty() {
                                 let state = ToggleLock(filepath);
-                                let dlgFileList = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
-                                let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
-                                let mut lock_image: String = "🔓".to_owned();
 
-                                if state == 1 {
-                                    lock_image = "🔒".to_owned();
+                                if 1 == 2 {
+                                    let dlgFileList = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
+                                    let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
+                                    let mut lock_image: String = "🔓".to_owned();
+
+                                    if state == 1 {
+                                        lock_image = "🔒".to_owned();
+                                    }
+                                    lock_image.push('\0');
+
+                                    let lv = LVITEMW {
+                                        mask: LVIF_TEXT,
+                                        iItem: selected.0.try_into().unwrap(),
+                                        iSubItem: 2,
+                                        state: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                                        stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
+                                        pszText: transmute(utf8_to_utf16(&lock_image).as_ptr()),
+                                        cchTextMax: 0,
+                                        iImage: 0,
+                                        lParam: LPARAM(0),
+                                        iIndent: 0,
+                                        iGroupId: LVITEMA_GROUP_ID(0),
+                                        cColumns: 0,
+                                        puColumns: std::ptr::null_mut(),
+                                        piColFmt: std::ptr::null_mut(),
+                                        iGroup: 0,
+                                    };
+
+                                    SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
+                                    SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_REDRAWITEMS, WPARAM(selected.0.try_into().unwrap()), LPARAM(selected.0));
+                                    UpdateWindow(dlgFileList);
+                                } else {
+                                    transfer_data_to_main_file_list();
                                 }
-                                lock_image.push('\0');
-
-                                let lv = LVITEMW {
-                                    mask: LVIF_TEXT,
-                                    iItem: selected.0.try_into().unwrap(),
-                                    iSubItem: 2,
-                                    state: LIST_VIEW_ITEM_STATE_FLAGS(0),
-                                    stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
-                                    pszText: transmute(utf8_to_utf16(&lock_image).as_ptr()),
-                                    cchTextMax: 0,
-                                    iImage: 0,
-                                    lParam: LPARAM(0),
-                                    iIndent: 0,
-                                    iGroupId: LVITEMA_GROUP_ID(0),
-                                    cColumns: 0,
-                                    puColumns: std::ptr::null_mut(),
-                                    piColFmt: std::ptr::null_mut(),
-                                    iGroup: 0,
-                                };
-
-                                SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
                             }
                         }
                         IDM_EXIF_BROWSER | IDC_MAIN_EXIF => {
@@ -2372,5 +2380,118 @@ fn transfer_data_to_exif_browser_list(hwnd: HWND, filename: &str) {
             SendDlgItemMessageA(hwnd, IDC_EXIF_BROWSER_List, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
         }
         MAIN_LISTVIEW_RESULTS.clear();
+    }
+}
+
+/// Does some sql magic to crate new file names
+///
+/// First, if any strftime strings are found, use sqlite's internal converter to change DateTimeOriginal into the requested format.
+/// Next, if any tags are between $(), it will get said tag value from the exif data for that file. If the tag isn't associated
+/// with that file, nothing will be inserted. Within reason, the user can ask for multiple tags to be added.
+/// Finally the file name will be cleabed of any illegal characters.
+fn prerename_files() {
+    unsafe {
+        let mut text: [u16; 512] = [0; 512];
+        let len = GetWindowTextW(GetDlgItem(MAIN_HWND, IDC_MAIN_PATTERN), &mut text);
+        let mut pattern = String::from_utf16_lossy(&text[..len as usize]);
+        let mut cmd: String = String::new();
+
+        if pattern.contains('%') {
+            cmd = format!(
+                r#"
+            UPDATE files
+            SET new_file_name = new_name
+          
+            FROM
+          
+          (  
+            SELECT
+              CASE
+                WHEN locked = 0 THEN
+                  STRFTIME('{pattern}', REPLACE(substr(value,0,11),':','-')||' '||SUBSTR(value,12))||
+                  '.'||
+                  REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
+                ELSE
+                  IFNULL(new_file_name,orig_file_name)
+              END new_name,
+              exif.path path
+          
+            FROM 
+              exif,
+              files
+          
+            WHERE 
+              tag='DateTimeOriginal' AND
+              exif.path = files.path
+            ) xx  
+          
+          WHERE files.path = xx.path;            
+            "#
+            );
+        } else if pattern.contains("$(") {
+            cmd = format!(
+                r#"
+            UPDATE files
+              SET new_file_name = new_name
+                FROM
+                 (  
+                  SELECT
+                    CASE
+                      WHEN locked = 0 THEN
+                        '{pattern}'
+                      ELSE
+                        IFNULL(new_file_name,orig_file_name)
+                      END new_name, path
+                    FROM files
+                  ) xx
+
+            WHERE files.path=xx.path;
+                    "#
+            );
+        }
+
+        while pattern.contains("$(") {
+            let start_delimeter = pattern.find("$(").unwrap();
+            let end_delimeter = pattern.find(')').unwrap();
+            let tag: String = pattern.get(start_delimeter + 2..end_delimeter).unwrap().to_owned();
+            let del: String = pattern.get(start_delimeter..end_delimeter + 1).unwrap().to_owned();
+
+            pattern = pattern.replace(&del, "");
+            cmd.push_str(&format!(
+                r#"
+            UPDATE files
+            SET new_file_name = new_name
+            
+            FROM
+                (  
+                    SELECT
+                    CASE
+                        WHEN locked = 0 THEN
+                        REPLACE(files.new_file_name,'$({tag})',value)
+                        ELSE
+                        IFNULL(new_file_name,orig_file_name)
+                    END new_name,
+                    exif.path path
+                
+                    FROM 
+                    exif,
+                    files
+                
+                    WHERE 
+                    tag='{tag}' AND
+                    exif.path = files.path
+                ) xx  
+          
+            WHERE files.path = xx.path;
+
+            UPDATE files SET new_file_name=REPLACE(new_file_name,'$({tag})','');
+               "#
+            ));
+        }
+
+        if !cmd.is_empty() {
+            cmd.push_str(r#"UPDATE files SET new_file_name=REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(new_file_name,':',''),'/',''),'\',''),'*',''),'?',''),'|',''),'"',''),'<',''),'>','');"#);
+            QuickNonReturningSqlCommand(cmd);
+        }
     }
 }

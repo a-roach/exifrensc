@@ -20,6 +20,18 @@ macro_rules! Fail {
     };
 }
 
+macro_rules! Commit {
+    () => {
+        send_cmd("Commit");
+    };
+}
+
+macro_rules! Begin {
+    () => {
+        send_cmd("Begin");
+    };
+}
+
 /// Our "database service" to handle internal database requests
 ///
 /// The server is a blocking server, so it only accepts a single request at a time.
@@ -88,7 +100,7 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 let value_delimeter = asked.cmd.rfind('=').unwrap();
                 let value = asked.cmd.get(value_delimeter + 1..).unwrap();
                 let id = asked.cmd.get(14..value_delimeter).unwrap();
-                let cmd = format!("UPDATE settings SET value={} WHERE id={};", value, id);
+                let cmd = format!("UPDATE settings SET value={value} WHERE id={id};");
                 db.execute(&cmd, []).expect("SetIntSetting() failed.");
                 //
             } else if asked.cmd.starts_with("GetTextSetting") {
@@ -100,7 +112,7 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 let value_delimeter = asked.cmd.rfind('=').unwrap();
                 let value = asked.cmd.get(value_delimeter + 1..).unwrap();
                 let id = asked.cmd.get(15..value_delimeter).unwrap();
-                let cmd = format!("UPDATE settings SET value='{}' WHERE id={};", value, id);
+                let cmd = format!("UPDATE settings SET value='{value}' WHERE id={id};");
                 db.execute(&cmd, []).expect("SetTextSetting() failed.");
                 //
             } else if asked.cmd.starts_with("SaveSettings") {
@@ -170,10 +182,7 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 INSERT INTO add_file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM file_pat WHERE idx >{idx};
                 DROP TABLE IF EXISTS file_pat;
                 ALTER TABLE add_file_pat RENAME TO file_pat;
-                "#,
-                    idx = idx,
-                    zName = zName,
-                    zSpec = zSpec
+                "#
                 );
                 db.execute_batch(&cmd).expect("AddFilePattern() failed.");
                 //
@@ -190,11 +199,10 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                                                idx=(SELECT idx FROM file_pat,settings 
                                                         WHERE 
                                                           file_pat.idx=(settings.value + 1) 
-                                                          AND id={} 
+                                                          AND id={idx} 
                                                           AND file_pat.idx
                                                         );               
-                                        "#,
-                    idx
+                                        "#
                 );
 
                 let mut stmt = db.prepare(&cmd).unwrap();
@@ -213,7 +221,7 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                         r#"
                 SELECT 
                   path,
-                  ifnull(orig_file_name,new_file_name) new_file_name,
+                  IFNULL(new_file_name,orig_file_name) new_file_name,
                   locked
                 FROM
                   files;                     "#,
@@ -233,6 +241,36 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                         file_rename.push('\0');
                         let lock_file: usize = row.unwrap().unwrap().get(2).expect("No results?");
                         MAIN_LISTVIEW_RESULTS.push((file_path, file_rename, lock_file));
+                    }
+                }
+                //
+            } else if asked.cmd.starts_with("prerename_files") {
+                let mut stmt = db
+                    .prepare(
+                        r#"
+                SELECT 
+                  path,
+                  orig_file_name
+                FROM
+                  files
+                WHERE
+                  locked=0;                     "#,
+                    )
+                    .expect("Prepare statement on prerename_files failed.");
+
+                unsafe {
+                    let mut rows = stmt.query([]);
+                    loop {
+                        let mut row = rows.as_mut().expect("row in rows failed").next();
+                        if row.as_mut().unwrap().is_none() {
+                            break;
+                        }
+                        let mut file_path: String = row.as_mut().unwrap().unwrap().get(0).expect("No results?");
+                        file_path.push('\0');
+                        let mut orig_file_name: String = row.as_mut().unwrap().unwrap().get(1).expect("No results?");
+                        orig_file_name.push('\0');
+                        let lock_file: usize = 0;
+                        MAIN_LISTVIEW_RESULTS.push((file_path, orig_file_name, lock_file));
                     }
                 }
                 //
@@ -300,25 +338,25 @@ pub fn send_cmd(cmd: &str) -> String {
 
 /// Get an integer value from the settings database
 pub fn GetIntSetting(id: i32) -> usize {
-    let cmd = format!("GetIntSetting={}", id);
+    let cmd = format!("GetIntSetting={id}");
     send_cmd(&cmd).as_str().parse::<usize>().unwrap()
 }
 
 /// Set an integer value from the settings database
 pub fn SetIntSetting(id: i32, value: isize) {
-    let cmd = format!("SetIntSetting={}={}", id, value);
+    let cmd = format!("SetIntSetting={id}={value}");
     send_cmd(&cmd);
 }
 
 /// Get a TEXT value from the settings database
 pub fn GetTextSetting(id: i32) -> String {
-    let cmd = format!("GetTextSetting={}", id);
+    let cmd = format!("GetTextSetting={id}");
     send_cmd(&cmd)
 }
 
 /// Set a TEXT value in the settings database
 pub fn SetTextSetting(id: i32, value: String) {
-    let cmd = format!("SetTextSetting={}={}", id, value);
+    let cmd = format!("SetTextSetting={id}={value}");
     send_cmd(&cmd);
 }
 
@@ -340,6 +378,7 @@ fn ReloadSettings_(db: &Connection) {
                 pszName TEXT,
                 pszSpec TEXT
               );
+
             ATTACH DATABASE '{}' AS SETTINGS;
               INSERT INTO main.settings SELECT * FROM settings.settings;
               INSERT INTO file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM settings.load_filterspec;
@@ -392,13 +431,13 @@ pub fn ApplySettings(hwnd: HWND) {
 
 /// Counts the number of <what>s in a <table> which resides in our in memory database
 pub fn Count(what: &str, table: &str) -> usize {
-    let cmd = format!("Count={}={}", what, table);
+    let cmd = format!("Count={what}={table}");
     send_cmd(&cmd).as_str().parse::<usize>().unwrap()
 }
 
 /// Gets file masks/patterns from our in memory database
 pub fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
-    let cmd = format!("GetFilePatterns={}", idx);
+    let cmd = format!("GetFilePatterns={idx}");
     let answer = send_cmd(&cmd);
     let delimeter = answer.rfind('&').unwrap();
     *zName = answer.get(..delimeter).unwrap().to_string();
@@ -407,14 +446,14 @@ pub fn GetFilePatterns(idx: usize, zName: &mut String, zSpec: &mut String) {
 
 /// Gets file speccs from our in memory database
 pub fn GetFileSpec(idx: usize, zSpec: &mut String) {
-    let cmd = format!("GetFileSpec={}", idx);
+    let cmd = format!("GetFileSpec={idx}");
     let answer = send_cmd(&cmd);
     *zSpec = answer;
 }
 
 /// Deletes a file masks/patterns from our in memory database
 pub fn DeleteFilePattern(zName: &mut String) {
-    let cmd = format!("DeleteFilePattern={}", zName);
+    let cmd = format!("DeleteFilePattern={zName}");
     send_cmd(&cmd);
 }
 
@@ -430,13 +469,13 @@ pub fn RestoreFilePatternDatabase() {
 
 /// Gets file masks/patterns from our in memory database
 pub fn AddFilePattern(idx: usize, zName: String, zSpec: String) {
-    let cmd = format!("AddFilePattern={}|+|{}|$|{}", idx, zName, zSpec);
+    let cmd = format!("AddFilePattern={idx}|+|{zName}|$|{zSpec}");
     send_cmd(&cmd);
 }
 
 /// Runs a non-returning batch sql script
 pub fn QuickNonReturningSqlCommand(sql: String) {
-    let cmd = format!("QuickNonReturningSqlCommand={}", sql);
+    let cmd = format!("QuickNonReturningSqlCommand={sql}");
     send_cmd(&cmd);
 }
 
@@ -449,7 +488,9 @@ pub fn DeleteFromDatabase(filename: String) {
 /// Togles the file lock and returns the updated value
 pub fn ToggleLock(filename: String) -> usize {
     let cmd: String = format!("UPDATE files SET locked=(CASE WHEN locked = 0 THEN 1 ELSE 0 END) WHERE path='{filename}';");
+    Begin!();
     QuickNonReturningSqlCommand(cmd);
+    Commit!();
     let cmd: String = format!("returnint=SELECT locked FROM files WHERE path='{filename}';");
     send_cmd(&cmd).as_str().parse::<usize>().unwrap()
 }
