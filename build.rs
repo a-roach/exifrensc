@@ -20,6 +20,7 @@ fn main() {
     let iso_8601_build_stamp = format!("pub const ISO_8601_BUILD_STAMP: &str=\"{}\\0\";\n",now.format("%Y-%m-%d %H:%M"));
     let vers = format!("pub const PROGRAM_VERSION: &str=\"{}.{}.{}.{}\\0\";\n", majorversion, minorversion, days, minutes);
     let copyright: String = now.format("pub const PROGRAM_COPYRIGHT: &str=\"2022-%Y\\0\";\n").to_string();
+    let settings_vers = format!("pub const SETTINGS_VERSION: &str=\"{majorversion}.{minorversion}\";\n");
 
 
     /*
@@ -133,6 +134,7 @@ pub struct ControlStuff
     out_body.push_str(&iso_8601_build_stamp);
     out_body.push_str(&vers);
     out_body.push_str(&copyright);
+    out_body.push_str(&settings_vers);
     out_body.push_str("\n\n");
 
 

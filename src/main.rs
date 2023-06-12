@@ -2,37 +2,42 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
-mod db;
-
 use core::mem::transmute;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::ffi::OsStr;
-use std::fs;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::mem::size_of;
-use std::os::raw::c_void;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::ptr::null;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Mutex;
-use std::thread;
-use std::{env, mem, slice};
-use windows::core::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
-use windows::Win32::UI::{
-    Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
-    Input::KeyboardAndMouse::EnableWindow,
-    Shell::{Common::COMDLG_FILTERSPEC, *},
-    WindowsAndMessaging::*,
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    env,
+    ffi::OsStr,
+    fs,
+    fs::File,
+    io::{BufRead, BufReader, Write},
+    mem,
+    mem::size_of,
+    os::raw::c_void,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    slice,
+    sync::{
+        mpsc,
+        mpsc::{Receiver, Sender},
+        Mutex,
+    },
+    thread,
 };
-use windows::Win32::{
-    Foundation::*,
-    Graphics::Gdi::*,
-    System::{Com::*, LibraryLoader::*, Threading::*},
+//use std::ptr::null;
+use windows::{
+    core::*,
+    Win32::{
+        Foundation::*,
+        Graphics::Gdi::*,
+        System::{Com::*, LibraryLoader::*, Threading::*},
+        UI::{
+            Controls::{LIST_VIEW_ITEM_STATE_FLAGS, LVITEMA_GROUP_ID, *},
+            Input::KeyboardAndMouse::{EnableWindow, SetFocus},
+            Shell::{Common::COMDLG_FILTERSPEC, *},
+            WindowsAndMessaging::*,
+        },
+    },
 };
 // use windows::Win32::UI::Shell::SHCreateItemInKnownFolder;
 // use windows::Win32::{System::Environment::GetCurrentDirectoryA};
@@ -42,47 +47,9 @@ use exif::In;
 
 include!("resource_defs.rs");
 
-// Custom Macros
-
-macro_rules! Warning {
-    ($a:expr) => {
-        MessageBoxA(None, s!($a), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
-    };
-}
-
-macro_rules! sWarning {
-    ($a:expr) => {
-        unsafe {
-            MessageBoxA(None, s!($a), s!("Warning!"), MB_OK | MB_ICONINFORMATION);
-        }
-    };
-}
-
-macro_rules! Fail {
-    ($a:expr) => {
-        unsafe {
-            MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
-        }
-    };
-}
-
-macro_rules! FailU {
-    ($a:expr) => {
-        MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
-    };
-}
-
-macro_rules! Commit {
-    () => {
-        send_cmd("Commit");
-    };
-}
-
-macro_rules! Begin {
-    () => {
-        send_cmd("Begin");
-    };
-}
+#[macro_use]
+mod macros;
+mod db;
 
 // Global Variables
 pub static mut path_to_settings_sqlite: String = String::new();
@@ -181,6 +148,8 @@ fn main() -> Result<()> {
                 mem_db(rx);
             });
 
+            check_settings_version();
+
             /*
              * Our windows message loop
              */
@@ -195,18 +164,18 @@ fn main() -> Result<()> {
     }
 }
 
-/// Macro which has some wordy and repaeted in-line code. Just here to make the code
+/// Function which has some wordy and repaeted in-line code. Just here to make the code
 /// more readable. It will see if the user has selected something, and if so, will return
 /// the file path which we use as a unique key in our database.
-macro_rules! GetSelectedPath {
-    () => {{
+fn GetSelectedPath() -> String {
+    unsafe {
         let dlgFileList: HWND = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
         let n = SendMessageA(dlgFileList, LVM_GETSELECTEDCOUNT, WPARAM(0), LPARAM(0));
         let mut name: String = String::new();
         if n.0 > 0 {
             let selected = SendMessageA(dlgFileList, LVM_GETSELECTIONMARK, WPARAM(0), LPARAM(0));
 
-            let name_buffer = [0; 256_usize];
+            let name_buffer = [0; 260_usize];
             let lv = LVITEMW {
                 mask: LVIF_TEXT,
                 iItem: 0,
@@ -214,7 +183,7 @@ macro_rules! GetSelectedPath {
                 state: LIST_VIEW_ITEM_STATE_FLAGS(0),
                 stateMask: LIST_VIEW_ITEM_STATE_FLAGS(0),
                 pszText: transmute(name_buffer.as_ptr()),
-                cchTextMax: 256,
+                cchTextMax: 260,
                 iImage: 0,
                 lParam: LPARAM(0),
                 iIndent: 0,
@@ -227,7 +196,7 @@ macro_rules! GetSelectedPath {
 
             SendMessageA(dlgFileList, LVM_GETITEMTEXT, WPARAM(selected.0.try_into().unwrap()), LPARAM(&lv as *const _ as isize));
 
-            let mut utf7_buffer: [u8; 256] = [0; 256_usize];
+            let mut utf7_buffer: [u8; 260] = [0; 260_usize];
             let mut i = 0;
             let mut j = 0;
 
@@ -243,7 +212,7 @@ macro_rules! GetSelectedPath {
             name.truncate(name.find('\0').unwrap());
         }
         name
-    }};
+    }
 }
 
 /// Dialog callback function for our main window
@@ -361,7 +330,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             }
                         }
                         IDC_MAIN_ERASE | IDM_REMOVE_FROM_LIST => {
-                            let filepath = GetSelectedPath!();
+                            let filepath = GetSelectedPath();
                             if !filepath.is_empty() {
                                 DeleteFromDatabase(filepath);
                                 let dlgFileList = GetDlgItem(MAIN_HWND, IDC_MAIN_FILE_LIST);
@@ -378,7 +347,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             DialogBoxParamA(hinst, PCSTR(IDD_MANUALLY_RENAME as *mut u8), hwnd, Some(manual_rename_dlg_proc), LPARAM(selected.0));
                         }
                         IDM_LOCK | IDC_MAIN_LOCK => {
-                            let filepath = GetSelectedPath!();
+                            let filepath = GetSelectedPath();
                             if !filepath.is_empty() {
                                 let state = ToggleLock(filepath);
 
@@ -419,7 +388,7 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                             }
                         }
                         IDM_EXIF_BROWSER | IDC_MAIN_EXIF => {
-                            let filepath = GetSelectedPath!();
+                            let filepath = GetSelectedPath();
                             if !filepath.is_empty() {
                                 let exif_hwnd: HWND = CreateDialogParamA(hinst, PCSTR(IDD_EXIF_Browser as *mut u8), HWND(0), Some(exif_browse_dlg_proc), LPARAM(0));
                                 transfer_data_to_exif_browser_list(exif_hwnd, &filepath);
@@ -604,7 +573,7 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 segoe_mdl2_assets.set_text(
                     IDC_PREFS_EXIF_Engine,
                     w!(""),
-                    w!("ExifTool requires an external program, is a little bit slower, but decodes tags more throughly.\r\rKamadak is internal, a bit faster, but not as comprehensive."),
+                    w!("ExifTool requires an external program, which you have to install, but decodes tags more throughly and you will get many private tags (that may not be useful, but are interesting).\r\rKamadak is internal, not as comprehensive, but probably gives you everything you need.\r\rEach represent some tag values in slightly different ways."),
                 );
 
                 let dlgIDC_PREFS_ON_CONFLICT_ADD: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_ADD);
@@ -618,8 +587,8 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 let dlgIDC_PREFS_ON_CONFLICT_NUM: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM);
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("12345\0").as_ptr() as isize));
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("1\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("02\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("003\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("01\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("001\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
 
                 let dlgIDC_PREFS_DATE_SHOOT_PRIMARY: HWND = GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY);
@@ -983,7 +952,7 @@ extern "system" fn manual_rename_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                 SendDlgItemMessageA(hwnd, IDC_MANUALLY_RENAME_Text, EM_SETLIMITTEXT, WPARAM(64), LPARAM(0));
                 SetFocus(GetDlgItem(hwnd, IDC_MANUALLY_RENAME_Text));
                 selected_ = lParam;
-                let path = GetSelectedPath!();
+                let path = GetSelectedPath();
                 let mut new_file_name = Get_new_file_name(path);
                 new_file_name.push('\0');
                 SetDlgItemTextW(hwnd, IDC_MANUALLY_RENAME_Text, PCWSTR(utf8_to_utf16(&new_file_name).as_ptr()));
@@ -1002,7 +971,7 @@ extern "system" fn manual_rename_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM,
                     let len = GetWindowTextW(GetDlgItem(hwnd, IDC_MANUALLY_RENAME_Text), &mut text);
                     let mut new_file_name = String::from_utf16_lossy(&text[..len as usize]);
 
-                    let path = GetSelectedPath!();
+                    let path = GetSelectedPath();
                     let cmd = format!("UPDATE files SET new_file_name='{new_file_name}' WHERE path='{path}';");
                     QuickNonReturningSqlCommand(cmd);
 
@@ -2333,13 +2302,11 @@ fn transfer_data_to_main_file_list() {
             SendDlgItemMessageA(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
             if item.2 == 0 {
                 lv.pszText = transmute(w!("🔓").as_ptr());
-                lv.iSubItem = 2;
-                SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
             } else {
                 lv.pszText = transmute(w!("🔒").as_ptr());
-                lv.iSubItem = 2;
-                SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
             }
+            lv.iSubItem = 2;
+            SendDlgItemMessageW(MAIN_HWND, IDC_MAIN_FILE_LIST, LVM_SETITEMTEXT, WPARAM(i), LPARAM(&lv as *const _ as isize));
         }
         MAIN_LISTVIEW_RESULTS.clear();
     }

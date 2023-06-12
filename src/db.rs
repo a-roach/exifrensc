@@ -5,31 +5,12 @@
 
 use super::*;
 use rusqlite::{Connection, Result};
+use std::{env, fs::remove_file};
 
 // Structure to hold our command and also a sender to siginal when the result has come back
 pub struct DBcommand {
     tx: mpsc::Sender<String>,
     cmd: String,
-}
-
-macro_rules! Fail {
-    ($a:expr) => {
-        unsafe {
-            MessageBoxA(None, s!($a), s!("Error!"), MB_OK | MB_ICONERROR);
-        }
-    };
-}
-
-macro_rules! Commit {
-    () => {
-        send_cmd("Commit");
-    };
-}
-
-macro_rules! Begin {
-    () => {
-        send_cmd("Begin");
-    };
 }
 
 /// Our "database service" to handle internal database requests
@@ -305,6 +286,12 @@ pub fn mem_db(rx: Receiver<DBcommand>) {
                 let mut stmt = db.prepare(cmd).unwrap();
                 my_response = stmt.query_row([], |row| row.get(0) as Result<String>).expect("No results?");
                 //
+            } else if asked.cmd.starts_with("returnrealfromsql=") {
+                let cmd = asked.cmd.get(18..).unwrap();
+                let mut stmt = db.prepare(cmd).unwrap();
+                let answer: f64 = stmt.query_row([], |row| row.get(0) as Result<f64>).expect("No results?");
+                my_response = format!("{}", answer);
+                //
             } else if asked.cmd.starts_with("Quit") {
                 unsafe {
                     PostThreadMessageA(MAIN_THREAD_ID, WM_QUIT, WPARAM(2), LPARAM(0));
@@ -378,10 +365,13 @@ fn ReloadSettings_(db: &Connection) {
                 pszName TEXT,
                 pszSpec TEXT
               );
+            DROP TABLE IF EXISTS version;
+            CREATE TABLE version (version);  
 
             ATTACH DATABASE '{}' AS SETTINGS;
               INSERT INTO main.settings SELECT * FROM settings.settings;
               INSERT INTO file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM settings.load_filterspec;
+              INSERT INTO main.version SELECT * FROM settings.version;
             DETACH DATABASE SETTINGS;"#,
             path_to_settings_sqlite
         );
@@ -499,4 +489,59 @@ pub fn ToggleLock(filename: String) -> usize {
 pub fn Get_new_file_name(filepath: String) -> String {
     let cmd: String = format!("returntextfromsql=SELECT ifnull(orig_file_name,new_file_name) new_file_name FROM files WHERE path='{filepath}';");
     send_cmd(&cmd)
+}
+
+/// Checks the version of the settings file saved to disk and updates the settings if there is a mismatch
+pub fn check_settings_version() {
+    let settings_version = send_cmd("returnrealfromsql=SELECT version FROM version;");
+
+    if SETTINGS_VERSION != settings_version {
+        let tmp_path = env::temp_dir();
+        let tmp_sqlite_settings: String = tmp_path.as_os_str().to_string_lossy().to_string() + ("\\settings.sqlite");
+        ResourceSave(IDB_SETTINGS, "SQLITE\0", &tmp_sqlite_settings);
+
+        if Path::new(&tmp_sqlite_settings).exists() {
+            remove_file(tmp_sqlite_settings.clone()).unwrap();
+        }
+
+        unsafe {
+            let cmd = format!(
+                r#"
+                ATTACH DATABASE '{tmp_sqlite_settings}' AS new_settings;
+                ATTACH DATABASE '{path_to_settings_sqlite}' AS saved_settings;
+                
+                INSERT INTO saved_settings.settings(name,ID,value)
+                SELECT name,ID,value
+                FROM new_settings
+                WHERE name NOT IN (SELECT name FROM saved_settings.settings);
+
+                DELETE FROM saved_settings.version;
+                INSERT INTO saved_settings.version(version) SELECT version FROM new_settings;
+
+                DETACH DATABASE new_settings;
+                DETACH DATABASE saved_settings;
+
+                DROP TABLE IF EXISTS 'settings';
+                CREATE TABLE 'settings' (name,ID,value);
+                DROP TABLE IF EXISTS file_pat;
+                CREATE TABLE 'file_pat' 
+                  (
+                    idx INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL UNIQUE, 
+                    pszName TEXT,
+                    pszSpec TEXT
+                  );
+                DROP TABLE IF EXISTS version;
+                CREATE TABLE version (version);  
+    
+                ATTACH DATABASE '{path_to_settings_sqlite}' AS SETTINGS;
+                  INSERT INTO main.settings SELECT * FROM settings.settings;
+                  INSERT INTO file_pat (pszName, pszSpec) SELECT pszName, pszSpec FROM settings.load_filterspec;
+                  INSERT INTO main.version SELECT * FROM settings.version;
+                DETACH DATABASE SETTINGS;"#
+            );
+            QuickNonReturningSqlCommand(cmd);
+
+            remove_file(tmp_sqlite_settings).unwrap();
+        }
+    }
 }
