@@ -232,8 +232,8 @@ extern "system" fn main_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lParam: 
                 segoe_mdl2_assets.set_text(IDC_MAIN_RENAME, w!("\u{E8AC}"), w!("Manually rename selected photo"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_ERASE, w!("\u{ED60}"), w!("Remove selected photo from the list"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_DELETE, w!("\u{ED62}"), w!("Remove all photos from the list"));
-                segoe_mdl2_assets.set_text(IDC_MAIN_LOCK, w!("\u{E72E}"), w!("Remove all photos from the list"));
-                segoe_mdl2_assets.set_text(IDC_MAIN_EXIF, w!("\u{E8EC}"), w!("Remove all photos from the list"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_LOCK, w!("\u{E72E}"), w!("Toggle locking file name from changes"));
+                segoe_mdl2_assets.set_text(IDC_MAIN_EXIF, w!("\u{E8EC}"), w!("Show EXIF tags"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_INFO, w!("\u{E946}"), w!("About"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_SETTINGS, w!("\u{F8B0}"), w!("Settings"));
                 segoe_mdl2_assets.set_text(IDC_MAIN_SYNC, w!("\u{EDAB}"), w!("Resync names"));
@@ -593,12 +593,13 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
 
                 let dlgIDC_PREFS_DATE_SHOOT_PRIMARY: HWND = GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY);
                 SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("DateTimeOriginal in the EXIF data\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("SubSecDateTimeOriginal in the EXIF data\0").as_ptr() as isize));
                 SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"File Created\" date\0").as_ptr() as isize));
                 SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"Last Modified\" date\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
 
-                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"File Created\" date\0").as_ptr() as isize));
-                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("use \"Last Modified\" date\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("\"File Created\" date\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("\"Last Modified\" date\0").as_ptr() as isize));
                 SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
 
                 /*
@@ -2368,29 +2369,39 @@ fn prerename_files() {
                 r#"
             UPDATE files
             SET new_file_name = new_name
-          
             FROM
-          
-          (  
-            SELECT
-              CASE
-                WHEN locked = 0 THEN
-                  STRFTIME('{pattern}', REPLACE(substr(value,0,11),':','-')||' '||SUBSTR(value,12))||
-                  '.'||
-                  REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
-                ELSE
-                  IFNULL(new_file_name,orig_file_name)
-              END new_name,
-              exif.path path
-          
-            FROM 
-              exif,
-              files
-          
-            WHERE 
-              tag='DateTimeOriginal' AND
-              exif.path = files.path
-            ) xx  
+              (  
+                SELECT
+                CASE
+                  WHEN locked = 0 THEN
+                    CASE (SELECT value FROM settings WHERE name='IDC_PREFS_DATE_SHOOT_PRIMARY')
+                        WHEN 0 THEN
+                        STRFTIME('{pattern}', REPLACE(substr(value,0,11),':','-')||' '||SUBSTR(value,12))||
+                        '.'||REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
+                      WHEN 1 THEN
+                        STRFTIME('{pattern}', REPLACE(substr(value,0,11),':','-')||' '||SUBSTR(value,12))||
+                        IFNULL((SELECT value FROM exif AS ss WHERE tag='SubSecTime' AND exif.path=ss.path),'')||
+                        '.'||REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
+                      WHEN 2 THEN
+                        STRFTIME('{pattern}', REPLACE(substr(created,0,11),':','-')||' '||SUBSTR(value,12))||
+                        '.'||REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
+                      WHEN 3 THEN
+                        STRFTIME('{pattern}', REPLACE(substr(modified,0,11),':','-')||' '||SUBSTR(value,12))||
+                        '.'||REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
+                    END
+                  ELSE
+                    IFNULL(new_file_name,orig_file_name)
+                END new_name,
+                exif.path path
+
+                FROM 
+                  exif,
+                  files
+            
+                WHERE
+                  tag='DateTimeOriginal' AND
+                  exif.path = files.path
+              ) xx  
           
           WHERE files.path = xx.path;            
             "#
