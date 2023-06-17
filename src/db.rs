@@ -406,9 +406,8 @@ pub fn ApplySettings(hwnd: HWND) {
     unsafe {
         SetIntSetting(IDC_PREFS_ON_CONFLICT, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_ON_CONFLICT_ADD, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT_ADD, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_ON_CONFLICT_NUM, SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT_NUM, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY, SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
-        SetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY, SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_strftimeUse, SendDlgItemMessageA(hwnd, IDC_PREFS_strftimeUse, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
+        SetIntSetting(IDC_PREFS_CreateSyntheticDate, SendDlgItemMessageA(hwnd, IDC_PREFS_CreateSyntheticDate, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_DRAG_N_DROP, SendDlgItemMessageA(hwnd, IDC_PREFS_DRAG_N_DROP, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         SetIntSetting(IDC_PREFS_EXIF_Engine, SendDlgItemMessageA(hwnd, IDC_PREFS_EXIF_Engine, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0);
         let mut tmp_text: [u16; MAX_PATH as usize] = [0; MAX_PATH as usize];

@@ -26,13 +26,10 @@
 #define IDC_MAIN_SYNC                           20044
 #define IDC_PREFS_APPLY                         21002
 #define IDC_PREFS_CANCEL                        21004
-#define IDC_PREFS_DATE_SHOOT_PRIMARY            21008
-#define IDC_PREFS_DATE_SHOOT_SECONDARY          21016
 #define IDC_PREFS_FILE_MASK                     21018
 #define IDC_PREFS_NX_STUDIO                     21020
 #define IDC_PREFS_ON_CONFLICT                   21022
 #define IDC_PREFS_ON_CONFLICT_ADD               21024
-#define IDC_PREFS_ON_CONFLICT_NUM               21026
 #define IDC_PREFS_RESET_SETTING                 21028
 #define IDC_PREFS_SAVE_SETTING                  21030
 #define IDC_PREFS_DRAG_N_DROP                   21032
@@ -51,11 +48,13 @@
 #define IDB_SETTINGS                            32158
 #define IDC_ABOUT_DESCRIPTION                   40000
 #define IDC_EXIF_Browse_Cancel                  40000
+#define IDC_PREFS_CreateSyntheticDate           21016
 #define IDC_THINKING_Cancel                     40000
 #define IDM_ADD_PICTURE                         40000
 #define IDC_COPYRIGHT                           40001
 #define IDC_EXIF_BROWSER_List                   40001
 #define IDC_MANUALLY_RENAME_Text                40001
+#define IDC_PREFS_strftimeUse                   21008
 #define IDM_ADD_FOLDER_OF_PICTURES              40001
 #define IDM_PrefsFileMaskDel                    40001
 #define IDC_ABOUT_ST_AUTHOR                     40002

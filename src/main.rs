@@ -563,8 +563,8 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 /*
                  * Set up our combo boxes
                  */
-                SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Add\0").as_ptr() as isize));
-                SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Add delimeter\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_ON_CONFLICT, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Skip adding a delimeter\0").as_ptr() as isize));
                 SendDlgItemMessageA(hwnd, IDC_PREFS_ON_CONFLICT, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT)), LPARAM(0));
 
                 SendDlgItemMessageW(hwnd, IDC_PREFS_EXIF_Engine, CB_ADDSTRING, WPARAM(0), LPARAM(w!("Phil Harvey's ExifTool\0").as_ptr() as isize));
@@ -581,26 +581,18 @@ extern "system" fn settings_dlg_proc(hwnd: HWND, nMsg: u32, wParam: WPARAM, lPar
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("-\0").as_ptr() as isize));
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!(".\0").as_ptr() as isize));
                 SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("~\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_ADDSTRING, WPARAM(0), LPARAM(w!("No delimeter\0").as_ptr() as isize));
                 SendMessageA(dlgIDC_PREFS_ON_CONFLICT_ADD, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_ADD)), LPARAM(0));
 
-                let dlgIDC_PREFS_ON_CONFLICT_NUM: HWND = GetDlgItem(hwnd, IDC_PREFS_ON_CONFLICT_NUM);
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("12345\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("1\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("01\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_ADDSTRING, WPARAM(0), LPARAM(w!("001\0").as_ptr() as isize));
-                SendMessageA(dlgIDC_PREFS_ON_CONFLICT_NUM, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_ON_CONFLICT_NUM)), LPARAM(0));
+                let dlgIDC_PREFS_strftimeUse: HWND = GetDlgItem(hwnd, IDC_PREFS_strftimeUse);
+                SendMessageW(dlgIDC_PREFS_strftimeUse, CB_ADDSTRING, WPARAM(0), LPARAM(w!("DateTimeOriginal in the EXIF data\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_strftimeUse, CB_ADDSTRING, WPARAM(0), LPARAM(w!("SubSecDateTimeOriginal in the EXIF data\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_strftimeUse, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"File Created\" date\0").as_ptr() as isize));
+                SendMessageW(dlgIDC_PREFS_strftimeUse, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"Last Modified\" date\0").as_ptr() as isize));
+                SendMessageA(dlgIDC_PREFS_strftimeUse, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_strftimeUse)), LPARAM(0));
 
-                let dlgIDC_PREFS_DATE_SHOOT_PRIMARY: HWND = GetDlgItem(hwnd, IDC_PREFS_DATE_SHOOT_PRIMARY);
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("DateTimeOriginal in the EXIF data\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("SubSecDateTimeOriginal in the EXIF data\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"File Created\" date\0").as_ptr() as isize));
-                SendMessageW(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("the \"Last Modified\" date\0").as_ptr() as isize));
-                SendMessageA(dlgIDC_PREFS_DATE_SHOOT_PRIMARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_PRIMARY)), LPARAM(0));
-
-                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("\"File Created\" date\0").as_ptr() as isize));
-                SendDlgItemMessageW(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_ADDSTRING, WPARAM(0), LPARAM(w!("\"Last Modified\" date\0").as_ptr() as isize));
-                SendDlgItemMessageA(hwnd, IDC_PREFS_DATE_SHOOT_SECONDARY, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY)), LPARAM(0));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_CreateSyntheticDate, CB_ADDSTRING, WPARAM(0), LPARAM(w!("\"File Created\" date\0").as_ptr() as isize));
+                SendDlgItemMessageW(hwnd, IDC_PREFS_CreateSyntheticDate, CB_ADDSTRING, WPARAM(0), LPARAM(w!("\"Last Modified\" date\0").as_ptr() as isize));
+                SendDlgItemMessageA(hwnd, IDC_PREFS_CreateSyntheticDate, CB_SETCURSEL, WPARAM(GetIntSetting(IDC_PREFS_CreateSyntheticDate)), LPARAM(0));
 
                 /*
                  * Setup up the file mask box, which is a listview
@@ -2220,7 +2212,7 @@ fn check_if_in_NXstudio() {
 /// Create a synthetic DateTimeOriginal exif tag for files which are missing exif data.
 fn fill_in_missing_DateTimeOriginal() {
     let mut cmd: String = String::new();
-    if GetIntSetting(IDC_PREFS_DATE_SHOOT_SECONDARY) == 0 {
+    if GetIntSetting(IDC_PREFS_CreateSyntheticDate) == 0 {
         cmd = r#"
             INSERT INTO exif (path,tag,tag_id,value)
             SELECT DISTINCT
@@ -2374,7 +2366,7 @@ fn prerename_files() {
                 SELECT
                 CASE
                   WHEN locked = 0 THEN
-                    CASE (SELECT value FROM settings WHERE name='IDC_PREFS_DATE_SHOOT_PRIMARY')
+                    CASE (SELECT value FROM settings WHERE name='IDC_PREFS_strftimeUse')
                         WHEN 0 THEN
                         STRFTIME('{pattern}', REPLACE(substr(value,0,11),':','-')||' '||SUBSTR(value,12))||
                         '.'||REPLACE(files.path, RTRIM(files.path, REPLACE(files.path, '.', '')), '')
